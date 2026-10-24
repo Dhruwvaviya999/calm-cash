@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "@calmcash/shared",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "strict": true,
+    // Isomorphic code: no DOM or Node.js globals, so the package stays safe for web and API.
+    "lib": ["ES2022"],
+    "types": []
+  },
+  "include": ["src"]
+}

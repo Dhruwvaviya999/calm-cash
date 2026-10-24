@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Environment files — never commit real configuration or secrets.
+# Only the documented `.env.example` templates are tracked.
+.env
+.env.*
+!.env.example
+
+# Build output and caches
+dist/
+.next/
+out/
+build/
+coverage/
+*.tsbuildinfo
+.eslintcache
+
+# Generated code (recreated by `pnpm db:generate` / `next typegen`)
+apps/api/src/generated/
+next-env.d.ts
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Misc
+*.pem
+.vercel

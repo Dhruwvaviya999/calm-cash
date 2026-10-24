@@ -1,0 +1,38 @@
+{
+  "name": "calmcash",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CalmCash — an AI-powered personal finance tracker (pnpm monorepo).",
+  "type": "module",
+  "packageManager": "pnpm@11.21.0",
+  "engines": {
+    "node": ">=24.11.0"
+  },
+  "scripts": {
+    "postinstall": "prisma generate",
+    "dev": "pnpm --parallel --filter @calmcash/api --filter @calmcash/web dev",
+    "build": "pnpm --recursive build",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc --noEmit && pnpm --recursive typecheck",
+    "test": "pnpm --recursive test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "db:up": "docker compose up --detach --wait postgres",
+    "db:down": "docker compose down",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:studio": "prisma studio"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/node": "catalog:",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "16.4.3",
+    "prettier": "^3.9.10",
+    "prettier-plugin-tailwindcss": "^0.8.1",
+    "prisma": "catalog:",
+    "typescript": "catalog:",
+    "typescript-eslint": "^8.72.0"
+  }
+}

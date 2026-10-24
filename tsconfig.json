@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "CalmCash root tooling (Prisma config)",
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "strict": true,
+    "target": "ES2024",
+    "lib": ["ES2024"],
+    "types": ["node"]
+  },
+  "include": ["prisma.config.ts"]
+}
