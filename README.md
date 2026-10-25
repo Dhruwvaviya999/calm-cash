@@ -3,20 +3,21 @@
 CalmCash is an AI-powered personal finance tracker. The roadmap covers transaction management,
 budgeting, bank statement imports, financial analytics, AI insights, and recurring payments.
 
-> **Status — Phase 1 (foundation) complete.** The monorepo, the API, the web app, shared
-> contracts, the database schema, and the quality gates are in place. Product features arrive in
-> later phases, starting with the design system (Phase 2).
+> **Status — Phase 2 (design system and app shell) complete.** On top of the Phase 1 foundation
+> (monorepo, API, shared contracts, database, quality gates), the web app now has the CalmCash
+> visual identity, a responsive shell with mobile bottom navigation, a reusable component system,
+> and a clearly labelled design prototype. Authentication arrives in Phase 3.
 
 ## Tech stack
 
-| Layer       | Technology                                                                      |
-| ----------- | ------------------------------------------------------------------------------- |
-| Web         | Next.js 16 (App Router, Turbopack), React 19, Tailwind CSS 4                    |
-| API         | Node.js 24, Express 5, pino, Helmet                                             |
-| Data        | PostgreSQL 18, Prisma 7 (`prisma-client` generator + `@prisma/adapter-pg`)      |
-| Contracts   | TypeScript 6 (strict), Zod 4 — shared by web and API via `@calmcash/shared`     |
-| Tooling     | pnpm 11 workspaces, Vitest 5, Supertest, ESLint 9 + typescript-eslint, Prettier |
-| Local infra | Docker Compose                                                                  |
+| Layer       | Technology                                                                                           |
+| ----------- | ---------------------------------------------------------------------------------------------------- |
+| Web         | Next.js 16 (App Router, Turbopack), React 19, Tailwind CSS 4, shadcn/ui (Radix), Lucide icons, Geist |
+| API         | Node.js 24, Express 5, pino, Helmet                                                                  |
+| Data        | PostgreSQL 18, Prisma 7 (`prisma-client` generator + `@prisma/adapter-pg`)                           |
+| Contracts   | TypeScript 6 (strict), Zod 4 — shared by web and API via `@calmcash/shared`                          |
+| Tooling     | pnpm 11 workspaces, Vitest 5, Supertest, ESLint 9 + typescript-eslint, Prettier                      |
+| Local infra | Docker Compose                                                                                       |
 
 ## Repository structure
 
@@ -34,11 +35,12 @@ calmcash/
 │   │       └── routes/      Versioned routers (/api/v1)
 │   └── web/                 Next.js web app (TypeScript)
 │       └── src/
-│           ├── app/         Routes, layout, loading/error/not-found boundaries
-│           ├── components/  Shared UI and layout components
-│           ├── features/    Feature modules (system status so far)
+│           ├── app/         Routes: (app) group with the shared shell, boundaries
+│           ├── components/  Design system: ui primitives, layout, feedback, finance, forms
+│           ├── features/    Feature modules (dashboard, transactions, budgets, …)
+│           ├── fixtures/    Prototype-only sample data (always labelled in the UI)
 │           ├── hooks/       Reusable React hooks
-│           ├── lib/         Typed env, API client
+│           ├── lib/         Env, API client, navigation, formatting, preferences
 │           ├── services/    Typed API endpoint functions
 │           └── types/       Web-only types
 ├── packages/
@@ -46,7 +48,7 @@ calmcash/
 ├── prisma/
 │   ├── schema.prisma        Database schema
 │   └── migrations/          Versioned SQL migrations
-├── docs/                    Architecture, database design, development guide
+├── docs/                    Architecture, UI architecture, database design, development guide
 ├── compose.yaml             Local PostgreSQL
 ├── prisma.config.ts         Prisma CLI configuration
 ├── eslint.config.mjs        Workspace lint rules
@@ -68,8 +70,9 @@ pnpm db:migrate                                  # apply migrations
 pnpm dev                                         # API on :4000, web on :3000
 ```
 
-Open <http://localhost:3000>. The status card should show the API as **Online** and the database
-as **Connected**. The API health endpoints are
+Open <http://localhost:3000> (it redirects to the dashboard). Phones get a bottom navigation bar,
+tablets an icon rail, and desktops a collapsible sidebar. **Settings → About and diagnostics**
+should show the API as **Online** and the database as **Connected**. The API health endpoints are
 [`/api/v1/health`](http://localhost:4000/api/v1/health) and
 [`/api/v1/health/ready`](http://localhost:4000/api/v1/health/ready).
 
@@ -95,6 +98,8 @@ as **Connected**. The API health endpoints are
 
 - [Architecture](docs/architecture.md) — boundaries, communication, module layout, error handling,
   configuration, technology decisions.
+- [UI architecture](docs/ui-architecture.md) — visual identity, design tokens, the responsive
+  shell, components, prototype-data rules, accessibility.
 - [Database design](docs/database-design.md) — model relationships, money representation, balance
   rules, constraints, migrations.
 - [Development guide](docs/development-guide.md) — setup, commands, testing, conventions,

@@ -1,5 +1,9 @@
+import { GeistSans } from 'geist/font/sans';
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
+
+import { PreferencesScript } from '@/components/theme/preferences-script';
+import { PreferencesSync } from '@/components/theme/preferences-sync';
 
 import './globals.css';
 
@@ -12,18 +16,25 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  // Lets future mobile/PWA layouts extend under notches using safe-area insets.
+  // Content may extend under notches and gesture bars; the shell pads with safe-area insets.
   viewportFit: 'cover',
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#f8f9fb' },
-    { media: '(prefers-color-scheme: dark)', color: '#16181d' },
+    { media: '(prefers-color-scheme: light)', color: '#fbfaf7' },
+    { media: '(prefers-color-scheme: dark)', color: '#0c0e12' },
   ],
 };
 
 export default function RootLayout({ children }: LayoutProps<'/'>): ReactNode {
   return (
-    <html lang="en">
-      <body className="min-h-dvh antialiased">{children}</body>
+    // The preferences script adjusts <html> (theme class, sidebar state) before hydration.
+    <html lang="en" className={GeistSans.variable} suppressHydrationWarning>
+      <head>
+        <PreferencesScript />
+      </head>
+      <body>
+        <PreferencesSync />
+        {children}
+      </body>
     </html>
   );
 }

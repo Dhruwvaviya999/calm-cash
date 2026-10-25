@@ -45,11 +45,14 @@ apps/
     routes/v1.ts           Composition root of API v1: mounts every module router
     generated/prisma/      Generated Prisma Client (git-ignored; `pnpm db:generate`)
   web/src/
-    app/                   Routes only (layouts, pages, loading/error/not-found boundaries)
-    features/<feature>/    Feature modules: components, hooks, and view logic for one capability
-    components/            Feature-agnostic UI (layout primitives, UI building blocks)
+    app/                   Routes only: root layout, (app) route group with the shell, boundaries
+    features/<feature>/    Feature modules: components and view logic for one capability
+    components/            Feature-agnostic design system (see docs/ui-architecture.md)
+      ui/                  shadcn/ui primitives (owned source)
+      brand/ layout/ theme/ feedback/ finance/ forms/
+    fixtures/              Prototype-only sample data (never imported by shared code)
     hooks/                 Reusable React hooks
-    lib/                   Infrastructure: typed env, API client
+    lib/                   Infrastructure: env, API client, navigation, formatting, preferences
     services/              One module per API resource; returns validated shared DTOs
     types/                 Web-only types (e.g. async UI state)
 packages/shared/src/
@@ -280,16 +283,18 @@ Rules that keep modules independent:
 | Shared package as TypeScript source           | No stale build output; one strict type-check; bundled into the API by tsup.                            |
 | PostgreSQL 18 (Docker)                        | Current stable major; port 5433 avoids clashing with a native install.                                 |
 | Money as BIGINT minor units                   | Exact integer arithmetic; serialised as strings in JSON. See the database design.                      |
+| shadcn/ui primitives (new-york, Radix)        | Accessible, owned component source; restyled through CalmCash tokens.                                  |
+| `clsx` + `tailwind-merge` for `cn`            | Stable, established helper; the shadcn v4 CLI's `cn` package is pre-1.0.                               |
+| Custom theme/sidebar preference store         | Pre-paint inline script per the Next.js guide; avoids `next-themes`' client-rendered script warning.   |
+| Geist via the `geist` package                 | Fonts bundled from npm with `next/font/local`; builds never fetch fonts.                               |
 
 ## 12. Prepared for later phases
 
-- **Responsive and mobile layouts:** `PageShell` is the single content column; the viewport uses
-  `viewport-fit=cover` for safe-area insets; semantic colour tokens live in `app/globals.css`.
-- **PWA:** `metadata` (application name) and `viewport.themeColor` are set in the root layout;
+- **Design system and app shell (Phase 2, done):** tokens, components, responsive navigation, and
+  prototype screens are documented in [ui-architecture.md](./ui-architecture.md). Prototype pages
+  take typed props, so later phases replace fixtures with API data without touching the shell.
+- **PWA:** `metadata`, `viewport.themeColor`, safe-area padding, and an app icon are in place;
   a web manifest (`app/manifest.ts`) and service worker are deliberately left for the PWA phase.
-- **Design system (Phase 2):** components use semantic token utilities (`bg-surface`,
-  `text-muted-foreground`, …); redefining tokens restyles the app. `components/ui/button-classes.ts`
-  is an interim placeholder for the upcoming `Button` component.
 - **Authentication:** CORS already permits credentials and the `Authorization` header; credential
   headers are redacted from logs; DTOs are separate from database models, so credential columns
   added later can never be serialised by accident.

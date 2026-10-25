@@ -1,47 +1,271 @@
 @import 'tailwindcss';
+@import 'tw-animate-css';
 
 /*
- * Minimal semantic design tokens for the foundation phase. Components use these names
- * (bg-surface, text-muted-foreground, …) rather than raw palette colours, so the Phase 2
- * design system can restyle the app by redefining tokens only.
+ * CalmCash design tokens
+ * ----------------------
+ * Raw values live on :root (light, the primary experience) and .dark, following the shadcn/ui
+ * variable conventions. `@theme inline` maps them onto Tailwind utilities, so components only use
+ * semantic names (bg-card, text-muted-foreground, text-income, …) and never raw colours.
+ * Every text/background pair is checked for WCAG AA contrast (see docs/ui-architecture.md).
  */
-@theme {
-  --font-sans:
-    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 
-  --color-background: oklch(0.985 0.003 247);
-  --color-foreground: oklch(0.22 0.02 265);
-  --color-surface: oklch(1 0 0);
-  --color-muted: oklch(0.92 0.008 255);
-  --color-muted-foreground: oklch(0.5 0.02 260);
-  --color-border: oklch(0.9 0.008 255);
-  --color-accent: oklch(0.56 0.12 170);
-  --color-positive: oklch(0.66 0.15 155);
-  --color-negative: oklch(0.6 0.2 25);
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Applies while the desktop sidebar is collapsed (state set on <html> before first paint). */
+@custom-variant sidebar-collapsed (&:where([data-sidebar='collapsed'], [data-sidebar='collapsed'] *));
+
+:root {
+  color-scheme: light;
+
+  /* Surfaces — warm paper background with crisp white cards */
+  --background: oklch(0.985 0.004 85);
+  --foreground: oklch(0.235 0.018 255);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.235 0.018 255);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.235 0.018 255);
+  --muted: oklch(0.958 0.006 85);
+  --muted-foreground: oklch(0.5 0.016 255);
+
+  /* Brand and actions — calm emerald */
+  --primary: oklch(0.505 0.105 165);
+  --primary-foreground: oklch(0.985 0.012 165);
+  --secondary: oklch(0.958 0.006 85);
+  --secondary-foreground: oklch(0.28 0.018 255);
+  --accent: oklch(0.955 0.028 165);
+  --accent-foreground: oklch(0.34 0.075 165);
+  --destructive: oklch(0.555 0.17 27);
+  --destructive-foreground: oklch(0.985 0.01 27);
+
+  /* Status */
+  --success: oklch(0.47 0.1 160);
+  --success-foreground: oklch(0.985 0.012 165);
+  --warning: oklch(0.78 0.14 78);
+  --warning-foreground: oklch(0.3 0.07 60);
+  --warning-text: oklch(0.52 0.115 65);
+
+  /* Money — direction is also always conveyed by sign and label, never colour alone */
+  --income: oklch(0.47 0.1 160);
+  --expense: oklch(0.52 0.12 35);
+  --transfer: oklch(0.49 0.075 255);
+
+  /* Lines and focus */
+  --border: oklch(0.912 0.007 85);
+  --input: oklch(0.8 0.01 85);
+  --ring: oklch(0.6 0.11 165);
+
+  /* Data visualisation (Phase 6 charts) */
+  --chart-1: oklch(0.6 0.11 165);
+  --chart-2: oklch(0.62 0.09 220);
+  --chart-3: oklch(0.75 0.13 78);
+  --chart-4: oklch(0.58 0.11 290);
+  --chart-5: oklch(0.65 0.13 30);
+
+  /* Navigation */
+  --sidebar: oklch(0.976 0.005 85);
+  --sidebar-foreground: oklch(0.3 0.018 255);
+  --sidebar-primary: oklch(0.505 0.105 165);
+  --sidebar-primary-foreground: oklch(0.985 0.012 165);
+  --sidebar-accent: oklch(0.94 0.03 165);
+  --sidebar-accent-foreground: oklch(0.32 0.075 165);
+  --sidebar-border: oklch(0.912 0.007 85);
+  --sidebar-ring: oklch(0.6 0.11 165);
+
+  /* Shape and elevation */
+  --radius: 0.75rem;
+  --elevation-1: 0 1px 2px 0 oklch(0.25 0.02 255 / 0.04), 0 1px 3px 0 oklch(0.25 0.02 255 / 0.04);
+  --elevation-2:
+    0 2px 4px -1px oklch(0.25 0.02 255 / 0.05), 0 6px 16px -4px oklch(0.25 0.02 255 / 0.08);
+  --elevation-3:
+    0 8px 24px -6px oklch(0.25 0.02 255 / 0.14), 0 2px 6px -2px oklch(0.25 0.02 255 / 0.06);
+
+  /* Application shell geometry */
+  --sidebar-width: 16rem;
+  --sidebar-width-collapsed: 4.5rem;
+  --app-header-height: 3.5rem;
+  --bottom-nav-height: 4rem;
+  --gutter: 1rem;
 }
 
-@media (prefers-color-scheme: dark) {
+@media (width >= 40rem) {
   :root {
-    --color-background: oklch(0.17 0.01 265);
-    --color-foreground: oklch(0.95 0.005 255);
-    --color-surface: oklch(0.21 0.012 265);
-    --color-muted: oklch(0.3 0.012 265);
-    --color-muted-foreground: oklch(0.72 0.015 260);
-    --color-border: oklch(0.3 0.012 265);
-    --color-accent: oklch(0.74 0.12 170);
-    --color-positive: oklch(0.72 0.15 155);
-    --color-negative: oklch(0.7 0.18 25);
+    --gutter: 1.5rem;
   }
+}
+
+@media (width >= 64rem) {
+  :root {
+    --app-header-height: 4rem;
+    --gutter: 2rem;
+  }
+}
+
+.dark {
+  color-scheme: dark;
+
+  /* Surfaces — deep charcoal and slate */
+  --background: oklch(0.165 0.008 260);
+  --foreground: oklch(0.955 0.004 260);
+  --card: oklch(0.205 0.01 260);
+  --card-foreground: oklch(0.955 0.004 260);
+  --popover: oklch(0.225 0.011 260);
+  --popover-foreground: oklch(0.955 0.004 260);
+  --muted: oklch(0.255 0.011 260);
+  --muted-foreground: oklch(0.72 0.012 260);
+
+  /* Brand and actions — mint on charcoal */
+  --primary: oklch(0.78 0.12 165);
+  --primary-foreground: oklch(0.205 0.04 165);
+  --secondary: oklch(0.255 0.011 260);
+  --secondary-foreground: oklch(0.92 0.006 260);
+  --accent: oklch(0.285 0.03 168);
+  --accent-foreground: oklch(0.9 0.06 165);
+  --destructive: oklch(0.68 0.155 27);
+  --destructive-foreground: oklch(0.18 0.03 27);
+
+  --success: oklch(0.79 0.12 162);
+  --success-foreground: oklch(0.205 0.04 165);
+  --warning: oklch(0.8 0.13 80);
+  --warning-foreground: oklch(0.24 0.05 60);
+  --warning-text: oklch(0.82 0.12 80);
+
+  --income: oklch(0.79 0.12 162);
+  --expense: oklch(0.76 0.1 35);
+  --transfer: oklch(0.77 0.07 255);
+
+  --border: oklch(0.29 0.011 260);
+  --input: oklch(0.4 0.012 260);
+  --ring: oklch(0.7 0.11 165);
+
+  --chart-1: oklch(0.74 0.12 165);
+  --chart-2: oklch(0.72 0.09 220);
+  --chart-3: oklch(0.8 0.12 80);
+  --chart-4: oklch(0.7 0.11 290);
+  --chart-5: oklch(0.74 0.12 32);
+
+  --sidebar: oklch(0.185 0.009 260);
+  --sidebar-foreground: oklch(0.9 0.006 260);
+  --sidebar-primary: oklch(0.78 0.12 165);
+  --sidebar-primary-foreground: oklch(0.205 0.04 165);
+  --sidebar-accent: oklch(0.27 0.032 168);
+  --sidebar-accent-foreground: oklch(0.9 0.07 165);
+  --sidebar-border: oklch(0.27 0.011 260);
+  --sidebar-ring: oklch(0.7 0.11 165);
+
+  /* On dark surfaces, separation comes from borders and tone; shadows stay subtle. */
+  --elevation-1: 0 1px 2px 0 oklch(0 0 0 / 0.3);
+  --elevation-2: 0 2px 4px -1px oklch(0 0 0 / 0.35), 0 8px 20px -6px oklch(0 0 0 / 0.45);
+  --elevation-3: 0 12px 32px -8px oklch(0 0 0 / 0.6), 0 2px 6px -2px oklch(0 0 0 / 0.4);
+}
+
+@theme inline {
+  --font-sans:
+    var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', 'Cascadia Code', Menlo, Consolas, monospace;
+
+  /* Compact label size for navigation chrome; everything else uses the default type scale. */
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-text: var(--warning-text);
+  --color-income: var(--income);
+  --color-expense: var(--expense);
+  --color-transfer: var(--transfer);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+
+  --shadow-xs: var(--elevation-1);
+  --shadow-sm: var(--elevation-1);
+  --shadow-md: var(--elevation-2);
+  --shadow-lg: var(--elevation-3);
+}
+
+/* Safe-area insets for gesture navigation bars and display cutouts. */
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Responsive horizontal page padding that also clears landscape display cutouts. */
+@utility px-gutter {
+  padding-inline-start: max(var(--gutter), env(safe-area-inset-left, 0px));
+  padding-inline-end: max(var(--gutter), env(safe-area-inset-right, 0px));
 }
 
 @layer base {
+  * {
+    @apply border-border;
+  }
+
   html {
-    color-scheme: light dark;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
   }
 
   body {
-    background-color: var(--color-background);
-    color: var(--color-foreground);
-    font-family: var(--font-sans);
+    @apply bg-background font-sans text-foreground antialiased;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Every interactive element gets a visible focus indicator unless a component styles its own. */
+  :where(a, button, input, select, textarea, summary, [role='button'], [tabindex]):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+/* Honour the user's motion preference everywhere, including third-party animations. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

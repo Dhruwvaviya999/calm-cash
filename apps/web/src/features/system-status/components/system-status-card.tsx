@@ -1,20 +1,15 @@
 'use client';
 
+import { RefreshCw } from 'lucide-react';
 import type { ReactNode } from 'react';
 
-import { outlineButtonClasses } from '@/components/ui/button-classes';
+import { StatusBadge, type StatusTone } from '@/components/feedback/status-badge';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { useAsyncResource } from '@/hooks/use-async-resource';
 import { ApiClientError } from '@/lib/api-client';
 
 import { loadSystemStatus, type SystemStatus } from '../load-system-status';
-
-type Tone = 'neutral' | 'positive' | 'negative';
-
-const TONE_CLASSES: Record<Tone, string> = {
-  neutral: 'bg-muted',
-  positive: 'bg-positive',
-  negative: 'bg-negative',
-};
 
 function StatusRow({
   label,
@@ -23,14 +18,13 @@ function StatusRow({
 }: {
   label: string;
   value: string;
-  tone: Tone;
+  tone: StatusTone;
 }): ReactNode {
   return (
     <div className="flex items-center justify-between gap-4 py-3">
       <dt className="text-sm text-muted-foreground">{label}</dt>
-      <dd className="flex items-center gap-2 text-sm font-medium">
-        <span aria-hidden="true" className={`size-2 rounded-full ${TONE_CLASSES[tone]}`} />
-        {value}
+      <dd>
+        <StatusBadge tone={tone}>{value}</StatusBadge>
       </dd>
     </div>
   );
@@ -58,53 +52,52 @@ function StatusRows({ status }: { status: SystemStatus }): ReactNode {
   );
 }
 
-/** Shows live connectivity between the web app, the API, and PostgreSQL. */
+/**
+ * Live connectivity between the web app, the API, and PostgreSQL (a diagnostic, shown in
+ * Settings). Failures are contained here: the rest of the app keeps working without the API.
+ */
 export function SystemStatusCard(): ReactNode {
   const { state, reload } = useAsyncResource(loadSystemStatus);
 
   return (
-    <section
-      aria-labelledby="system-status-heading"
-      className="w-full rounded-2xl border border-border bg-surface p-5 shadow-sm sm:p-6"
-    >
-      <div className="flex items-center justify-between gap-4">
-        <h2 id="system-status-heading" className="text-base font-semibold">
-          System status
-        </h2>
-        <button
-          type="button"
-          onClick={reload}
-          disabled={state.status === 'loading'}
-          className={outlineButtonClasses}
-        >
-          Check again
-        </button>
-      </div>
+    <Card className="p-5 sm:p-6">
+      <section aria-labelledby="system-status-heading">
+        <div className="flex items-center justify-between gap-4">
+          <h3 id="system-status-heading" className="font-semibold">
+            System status
+          </h3>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={reload}
+            disabled={state.status === 'loading'}
+          >
+            <RefreshCw aria-hidden="true" />
+            Check again
+          </Button>
+        </div>
 
-      <dl
-        aria-live="polite"
-        aria-busy={state.status === 'loading'}
-        className="mt-2 divide-y divide-border"
-      >
-        <StatusRow label="Web app" value="Running" tone="positive" />
-        {state.status === 'loading' && <StatusRow label="API" value="Checking…" tone="neutral" />}
-        {state.status === 'success' && <StatusRows status={state.data} />}
-        {state.status === 'error' && <StatusRow label="API" value="Offline" tone="negative" />}
-      </dl>
+        <dl aria-live="polite" aria-busy={state.status === 'loading'} className="mt-2 divide-y">
+          <StatusRow label="Web app" value="Running" tone="positive" />
+          {state.status === 'loading' && <StatusRow label="API" value="Checking…" tone="neutral" />}
+          {state.status === 'success' && <StatusRows status={state.data} />}
+          {state.status === 'error' && <StatusRow label="API" value="Offline" tone="negative" />}
+        </dl>
 
-      {state.status === 'error' && (
-        <p role="alert" className="mt-3 text-sm text-negative">
-          {describeError(state.error)}
-        </p>
-      )}
-      {state.status === 'success' && (
-        <p className="mt-3 text-xs text-muted-foreground">
-          Last checked{' '}
-          <time dateTime={state.data.checkedAt}>
-            {new Date(state.data.checkedAt).toLocaleTimeString()}
-          </time>
-        </p>
-      )}
-    </section>
+        {state.status === 'error' && (
+          <p role="alert" className="mt-3 text-sm text-expense">
+            {describeError(state.error)}
+          </p>
+        )}
+        {state.status === 'success' && (
+          <p className="mt-3 text-xs text-muted-foreground">
+            Last checked{' '}
+            <time dateTime={state.data.checkedAt}>
+              {new Date(state.data.checkedAt).toLocaleTimeString()}
+            </time>
+          </p>
+        )}
+      </section>
+    </Card>
   );
 }

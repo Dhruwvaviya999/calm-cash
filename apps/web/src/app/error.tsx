@@ -2,8 +2,8 @@
 
 import { useEffect, type ReactNode } from 'react';
 
+import { ErrorState } from '@/components/feedback/error-state';
 import { PageShell } from '@/components/layout/page-shell';
-import { outlineButtonClasses } from '@/components/ui/button-classes';
 
 interface ErrorPageProps {
   /** The thrown value; not necessarily an `Error` when thrown from a Client Component. */
@@ -19,6 +19,7 @@ function getErrorDigest(error: unknown): string | undefined {
     : undefined;
 }
 
+/** Last-resort boundary for failures outside the app shell (in-app pages use (app)/error.tsx). */
 export default function ErrorPage({ error, retry }: ErrorPageProps): ReactNode {
   useEffect(() => {
     // Replaced by an error-reporting integration in a later phase.
@@ -29,26 +30,12 @@ export default function ErrorPage({ error, retry }: ErrorPageProps): ReactNode {
 
   return (
     <PageShell>
-      <div role="alert" className="space-y-4">
-        <h1 className="text-2xl font-semibold tracking-tight">Something went wrong</h1>
-        <p className="text-muted-foreground">
-          An unexpected error occurred while loading this page. Please try again.
-        </p>
-        {digest !== undefined && (
-          <p className="text-xs text-muted-foreground">
-            Reference: <code>{digest}</code>
-          </p>
-        )}
-        <button
-          type="button"
-          onClick={() => {
-            retry();
-          }}
-          className={outlineButtonClasses}
-        >
-          Try again
-        </button>
-      </div>
+      <ErrorState
+        headingLevel="h1"
+        description="An unexpected error occurred while loading this page. Please try again."
+        onRetry={retry}
+        {...(digest === undefined ? {} : { reference: digest })}
+      />
     </PageShell>
   );
 }

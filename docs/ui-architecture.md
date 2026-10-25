@@ -1,0 +1,221 @@
+# CalmCash UI architecture
+
+How the web app (`apps/web`) is designed and built: the visual identity, design tokens, the
+responsive application shell, the component system, and the rules that let later phases replace
+prototype screens without rewriting the shell. Established in Phase 2.
+
+## 1. Design principles
+
+CalmCash should feel calm, trustworthy, and clear: a carefully designed product, not an admin
+template.
+
+- **Clarity over decoration.** Neutral warm surfaces, subtle borders, soft elevation, generous
+  spacing. No gradients, glass effects, or ornamental illustrations.
+- **Numbers first.** Money uses tabular figures, exact formatting (never floating point), and a
+  consistent sign convention: `+` credit, `−` debit, no sign for transfers.
+- **Never colour alone.** Every financial or status colour is paired with a sign, icon, or label.
+- **Mobile is a first-class app.** Phones get an Android-style bottom bar and bottom sheets, not a
+  shrunken desktop sidebar.
+- **Honest UI.** Nothing implies a feature works before it does: unavailable actions are absent or
+  clearly marked "Coming soon", and sample data is always labelled.
+- **Restrained motion.** Short transitions (≤200ms) for state changes only, all disabled under
+  `prefers-reduced-motion`.
+
+## 2. Visual identity
+
+- **Wordmark** (`components/brand/wordmark.tsx`): an emerald rounded tile with the Lucide `Sprout`
+  icon (steady growth) beside "Calm**Cash**", with "Cash" in the primary colour. `variant="mark"`
+  renders the tile alone with an accessible name. No image assets; the favicon
+  (`app/icon.svg`) reuses the same mark.
+- **Typography:** Geist Sans from the `geist` npm package, loaded with `next/font/local`, so builds
+  never fetch fonts from the network. Default Tailwind type scale plus `text-2xs` (11px) for
+  navigation labels.
+- **Colour:** a warm paper light theme (primary) and a deep charcoal/slate dark theme, an emerald
+  (light) / mint (dark) primary, and a restrained coral for debits and destructive actions.
+
+## 3. Design tokens
+
+All tokens live in [`apps/web/src/app/globals.css`](../apps/web/src/app/globals.css), following
+the shadcn/ui conventions: raw values on `:root` (light) and `.dark`, mapped to Tailwind
+utilities in `@theme inline`. Components use semantic utilities only (`bg-card`,
+`text-muted-foreground`, `text-income`, …), never raw colours.
+
+| Group               | Tokens                                                                                                                    |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Surfaces            | `background`, `foreground`, `card`, `popover`, `muted`, `muted-foreground`                                                |
+| Actions             | `primary`, `secondary`, `accent`, `destructive` (+ `-foreground` pairs)                                                   |
+| Status              | `success`, `warning`, `warning-text`                                                                                      |
+| Money               | `income` (credit), `expense` (debit), `transfer`                                                                          |
+| Lines and focus     | `border`, `input`, `ring`                                                                                                 |
+| Charts (Phase 6)    | `chart-1` … `chart-5`                                                                                                     |
+| Navigation          | `sidebar`, `sidebar-foreground`, `sidebar-primary`, `sidebar-accent`, `sidebar-border`, `sidebar-ring`                    |
+| Shape and elevation | `--radius` (12px; derived `radius-sm` … `radius-2xl`), `--elevation-1…3` → `shadow-xs…lg`                                 |
+| Shell geometry      | `--sidebar-width` (16rem), `--sidebar-width-collapsed` (4.5rem), `--app-header-height`, `--bottom-nav-height`, `--gutter` |
+
+**Contrast.** Every text/background pair was checked against WCAG 2.x AA (4.5:1 for text, 3:1 for
+the focus ring) in both themes: body text is about 16:1, muted text at least 5.3:1, and the
+income, debit, transfer, and warning colours at least 5.2:1 on cards. Re-check any new pair the
+same way before adding it.
+
+**Utilities defined in CSS:**
+
+| Utility / variant    | Purpose                                                                      |
+| -------------------- | ---------------------------------------------------------------------------- |
+| `dark:`              | Applies under `.dark` on `<html>`.                                           |
+| `sidebar-collapsed:` | Applies while `<html data-sidebar="collapsed">` (desktop sidebar collapsed). |
+| `pt-safe`, `pb-safe` | Safe-area insets for notches and gesture bars.                               |
+| `px-gutter`          | Responsive page gutter (16 / 24 / 32px) that also clears landscape cutouts.  |
+
+## 4. Theme and display preferences
+
+Theme (`light` · `dark` · `system`) and the desktop sidebar state are stored in `localStorage`
+and mirrored on `<html>` ([`lib/preferences.ts`](../apps/web/src/lib/preferences.ts)):
+
+1. `PreferencesScript` (rendered in the root layout's `<head>`) runs **before first paint** and
+   applies `.dark` and `data-sidebar="collapsed"`, so statically prerendered pages never flash.
+   `<html suppressHydrationWarning>` lets React accept those attributes.
+2. Client components read preferences through `useThemePreference()` / `useSidebarState()`
+   (`useSyncExternalStore` with a default server snapshot, so there is no hydration mismatch).
+3. `PreferencesSync` follows OS light/dark changes and changes made in other tabs.
+
+This follows the Next.js 16 guide "Preventing flash before hydration". `next-themes` is not used:
+it renders its script from a Client Component, which React 19 warns about, while the custom store is
+small, dependency-free, and its bootstrap script is unit-tested.
+
+## 5. Application shell
+
+Every in-app route lives in the `(app)` route group, whose layout renders
+[`AppShell`](../apps/web/src/components/layout/app-shell.tsx). The shell is a Server Component.
+Only the parts that need the current route or user input are Client Components.
+
+| Width      | Navigation                                                           | Header                                    |
+| ---------- | -------------------------------------------------------------------- | ----------------------------------------- |
+| < 768px    | Fixed bottom bar: Home · Transactions · Budgets · Accounts · More    | Compact bar with the wordmark             |
+| 768–1023px | Icon-only navigation rail with tooltips                              | Breadcrumb (group › page), theme, account |
+| ≥ 1024px   | Full sidebar with grouped links, collapsible to the rail (persisted) | Breadcrumb, theme, account                |
+
+- **Bottom bar** (`MobileBottomNav`): every cell is the full 64px bar height (touch targets well
+  above 48×48px); the active destination gets a Material-style pill; the bar pads for the gesture
+  area with `pb-safe`. Below 360px the labels shrink slightly so "Transactions" never truncates.
+- **More** (`MobileMoreMenu`): a bottom sheet (Radix Dialog) with secondary destinations from the
+  navigation config and non-interactive "Coming later" items. Escape, the close button, the
+  overlay, or choosing a destination closes it.
+- **Sidebar** (`DesktopSidebar`): groups _Overview_ (Dashboard, Insights) and _Manage_
+  (Transactions, Budgets, Accounts), with Settings and the collapse control pinned at the bottom.
+  The active item has a tinted background, a left indicator, and `aria-current="page"`. When
+  labels are hidden (rail or collapsed), they stay available to screen readers and appear as
+  tooltips on hover or focus.
+- **Navigation config** ([`lib/navigation.ts`](../apps/web/src/lib/navigation.ts)) is the single
+  source of truth. Sidebar, bottom bar, More sheet, and breadcrumb all read it, and `href`s are
+  typed `Route`s, so a broken link fails the build.
+- **Page frame:** `PageContainer` (max width 80rem, responsive gutters and rhythm) and
+  `PageHeader` (the page's only `<h1>`, description, optional eyebrow and actions).
+- **Resilience:** `(app)/loading.tsx` and `(app)/error.tsx` render inside the shell, so a failing
+  page never takes navigation down. The shell makes no API calls; the Phase 1 system-status
+  check lives in Settings → About and diagnostics and fails gracefully.
+- **Skip link:** the first focusable element jumps to `<main id="main-content">`.
+
+## 6. Component system
+
+Accessible primitives come from **shadcn/ui** (new-york style, Radix UI, `components.json`).
+They are owned source files in `components/ui/` and were adapted to the project's lint rules
+(explicit return types, `import type`, local `cn`). CalmCash components build on them:
+
+| Area     | Component                                                                                                                                                                               | Responsibility                                |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| ui       | `button`, `badge`, `card`, `input`, `skeleton`, `separator`, `avatar`, `tooltip`, `dropdown-menu`, `sheet`, `alert-dialog`                                                              | Primitives (shadcn/ui).                       |
+| brand    | `Wordmark`                                                                                                                                                                              | Logo treatment.                               |
+| layout   | `AppShell`, `DesktopSidebar`, `MobileBottomNav`, `MobileMoreMenu`, `AppHeader`, `HeaderContext`, `UserMenu`, `PageContainer`, `PageHeader`, `SectionHeader`, `SectionLink`, `PageShell` | Shell, navigation, page structure.            |
+| theme    | `ThemeToggle`, `PreferencesScript`, `PreferencesSync`                                                                                                                                   | Theme menu and preference plumbing.           |
+| feedback | `StatusBadge`, `EmptyState`, `PlannedCapabilities`, `ErrorState`, `PageSkeleton`, `ListSkeleton`, `ConfirmDialog`, `PreviewNotice`                                                      | States and messaging.                         |
+| finance  | `FinancialAmount`, `StatCard`, `ProgressMeter`, `CategoryIcon`                                                                                                                          | Money display patterns.                       |
+| forms    | `SearchInput`, `FilterBar`, `FilterOptions`                                                                                                                                             | Search and segmented filters (native radios). |
+
+Feature modules (`features/<feature>/`, public API in `index.ts`):
+
+| Feature         | Contents                                                                                                                    |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `transactions`  | `TransactionRow`, `TransactionList`, `TransactionExplorer` (client filter over server-rendered rows), `TransactionListItem` |
+| `budgets`       | `BudgetProgress`, `getBudgetStatus` (on track / close to limit / over budget)                                               |
+| `accounts`      | `AccountCard`                                                                                                               |
+| `dashboard`     | `BalanceOverview`, `SummaryStats`, `SpendingOverview`, `RecentTransactions`, `BudgetOverview`, view-model types             |
+| `settings`      | `AppearanceSettings`, `ResetDisplayPreferences`                                                                             |
+| `system-status` | `SystemStatusCard` (Phase 1 diagnostics, restyled)                                                                          |
+
+**Transaction pattern.** `TransactionRow` answers _who_ (merchant, or "To {account}" for
+transfers), _why_ (description), _when_ (date in IST), _how_ (category and payment account), and
+_how much_ (`FinancialAmount`), with the same structure on every screen size. It takes shared DTOs
+(`TransactionDto`, `AccountDto`, `CategoryDto`), so Phase 5 can feed it API data unchanged.
+
+**Money.** `FinancialAmount` formats with `lib/format.ts`, which converts minor units to an exact
+decimal string (BigInt arithmetic) and formats with `Intl.NumberFormat('en-IN')`. `display` size
+renders the fraction smaller via `formatToParts`. Directions: `credit` (+, income colour),
+`debit` (−, coral), `transfer` (no sign), `balance` (signed). Each also has a screen-reader label.
+
+**Server first.** Pages and most components are Server Components. Client Components are limited
+to the theme toggle, preference sync, sidebar, bottom bar, More sheet, header breadcrumb, user menu,
+confirm dialog, settings controls, the transaction explorer, and the system-status card. The
+transaction explorer receives _server-rendered_ rows as props, so formatting runs only on the server
+(no hydration mismatch, and row code is not shipped to the browser).
+
+## 7. Routes
+
+| Route           | Content in Phase 2                                                                                          |
+| --------------- | ----------------------------------------------------------------------------------------------------------- |
+| `/`             | Temporary (307) redirect to `/dashboard`.                                                                   |
+| `/dashboard`    | Visual prototype: balance overview, money in/out/saved, recent transactions, budgets, spending by category. |
+| `/transactions` | Upcoming-feature state and a sample list with working search and type filters.                              |
+| `/budgets`      | Upcoming-feature state and sample budget progress cards.                                                    |
+| `/accounts`     | Upcoming-feature state and sample account cards.                                                            |
+| `/insights`     | Upcoming-feature state and what to expect (no generated insights).                                          |
+| `/settings`     | Working theme selection and preference reset, region defaults, diagnostics.                                 |
+| unknown URLs    | Branded 404 (HTTP 404).                                                                                     |
+
+All routes are statically prerendered.
+
+## 8. Prototype data rules
+
+- Sample data lives only in [`src/fixtures/sample-finances.ts`](../apps/web/src/fixtures/sample-finances.ts).
+  It is typed with the shared DTOs and feature view models, validated against the shared Zod
+  schemas by a test, and its totals are internally consistent (also tested).
+- Only route files (and features via props) may use it. ESLint forbids importing fixtures from
+  `components/`, `hooks/`, `lib/`, `services/`, and `types/`.
+- Every screen showing fixture data carries a "Design preview" badge, a `PreviewNotice`, or a
+  "Sample data" badge. Aggregates (balances, totals) are stated in the fixture, never calculated in
+  the UI. Real figures will come from the API.
+- **Replacing a prototype:** keep the feature components and pass them API data. For example, the
+  dashboard page will build `MonthSummary` and `TransactionListItem[]` from service calls instead
+  of fixtures, and the shell needs no changes.
+
+## 9. Accessibility checklist
+
+- Landmarks: one `<main>`, labelled `<nav>`s (only one visible per breakpoint), `<header>`, and
+  sections labelled by their headings. Each page has exactly one `<h1>`.
+- Keyboard: skip link, visible focus on everything (global `:focus-visible` fallback), Radix menus
+  and dialogs with arrow keys, Escape, focus trapping, and focus return; native radios for filters.
+- Labels: icon-only buttons have `aria-label`s; the search field has an accessible name; the
+  collapse control reports `aria-expanded`.
+- Status never by colour alone (badges include icons and text; amounts include signs and
+  screen-reader labels; progress bars expose `aria-valuetext`).
+- Touch targets at least 40px (48px+ in the bottom bar); 16px inputs on mobile avoid iOS zoom.
+- `prefers-reduced-motion` disables animations and transitions globally.
+
+## 10. Adding to the UI
+
+**A new page:** create `app/(app)/<route>/page.tsx` with `PageContainer` + `PageHeader`; add the
+destination to `NAV_ITEMS` (choose `group` and `mobilePlacement`) and it appears in every
+navigation surface.
+
+**A new shadcn/ui primitive:** from `apps/web`, run `pnpm dlx shadcn@4.22.1 add <name>`. Then:
+
+1. replace `import { cn } from "cn"` with `import { cn } from "@/lib/utils"` and remove the `cn`
+   package the CLI adds (`pnpm remove cn`); the project uses the established `clsx` +
+   `tailwind-merge` helper;
+2. install any peer the CLI omitted (for example `class-variance-authority`);
+3. run `pnpm format` and `pnpm lint`, and add explicit return types (`React.JSX.Element`) where
+   lint asks for them.
+
+Never loosen lint or TypeScript settings to accommodate generated code.
+
+**A new colour:** add the raw value to `:root` and `.dark`, map it in `@theme inline`, check its
+contrast in both themes, and document it in section 3.

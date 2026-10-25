@@ -1,13 +1,13 @@
 import type { ReactNode } from 'react';
 
-import { PageShell } from '@/components/layout/page-shell';
+import { PageSkeleton } from '@/components/feedback/loading-skeleton';
+import { PageContainer } from '@/components/layout/page-container';
 
+/** Fallback for segments outside the app shell; in-app pages use (app)/loading.tsx. */
 export default function Loading(): ReactNode {
   return (
-    <PageShell>
-      <p role="status" className="text-sm text-muted-foreground">
-        Loading…
-      </p>
-    </PageShell>
+    <PageContainer className="min-h-dvh justify-center">
+      <PageSkeleton />
+    </PageContainer>
   );
 }

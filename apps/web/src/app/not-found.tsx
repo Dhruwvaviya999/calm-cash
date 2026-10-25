@@ -1,9 +1,11 @@
+import { Compass, LayoutDashboard } from 'lucide-react';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 
+import { EmptyState } from '@/components/feedback/empty-state';
 import { PageShell } from '@/components/layout/page-shell';
-import { outlineButtonClasses } from '@/components/ui/button-classes';
+import { Button } from '@/components/ui/button';
 
 export const metadata: Metadata = {
   title: 'Page not found',
@@ -12,16 +14,20 @@ export const metadata: Metadata = {
 export default function NotFound(): ReactNode {
   return (
     <PageShell>
-      <div className="space-y-4">
-        <p className="text-sm font-semibold text-accent">404</p>
-        <h1 className="text-2xl font-semibold tracking-tight">Page not found</h1>
-        <p className="text-muted-foreground">
-          The page you are looking for does not exist or has moved.
-        </p>
-        <Link href="/" className={outlineButtonClasses}>
-          Back to home
-        </Link>
-      </div>
+      <EmptyState
+        icon={Compass}
+        headingLevel="h1"
+        badge={<p className="text-sm font-semibold text-primary">Error 404</p>}
+        title="This page does not exist"
+        description="The address may be mistyped, or the page has moved. Your dashboard is a good place to start again."
+      >
+        <Button asChild>
+          <Link href="/dashboard">
+            <LayoutDashboard aria-hidden="true" />
+            Go to dashboard
+          </Link>
+        </Button>
+      </EmptyState>
     </PageShell>
   );
 }

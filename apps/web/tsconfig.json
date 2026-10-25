@@ -5,7 +5,8 @@
   "compilerOptions": {
     "strict": true,
     "target": "ES2022",
-    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    // ES2023.Intl: exact decimal-string formatting in Intl.NumberFormat (money never uses floats).
+    "lib": ["DOM", "DOM.Iterable", "ES2022", "ES2023.Intl"],
     "types": ["node"],
     "jsx": "react-jsx",
     "allowJs": false,

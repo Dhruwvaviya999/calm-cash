@@ -47,8 +47,9 @@ pnpm dev
 
 Then open:
 
-- Web app: <http://localhost:3000> — the "System status" card should report the API as **Online**
-  and the database as **Connected**.
+- Web app: <http://localhost:3000> (redirects to the dashboard). In **Settings → About and
+  diagnostics**, the "System status" card should report the API as **Online** and the database as
+  **Connected**.
 - API liveness: <http://localhost:4000/api/v1/health>
 - API readiness: <http://localhost:4000/api/v1/health/ready>
 
@@ -138,13 +139,21 @@ pnpm --filter @calmcash/api exec vitest          # watch mode
 pnpm --filter @calmcash/api exec vitest src/app.test.ts   # one file
 ```
 
-| Package  | Suites                                                                                                                                                                     |
-| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `shared` | Minor-unit money helpers; schema validation rules; compile-time schema ⇄ interface equality.                                                                               |
-| `api`    | Health endpoints, error envelopes, CORS, security headers, request IDs, env validation, the validation convention, graceful shutdown, Prisma enum ⇄ shared literal parity. |
-| `web`    | API client: URL building, payload validation, error mapping, network failures, aborts.                                                                                     |
+| Package  | Suites                                                                                                                                                                                                                             |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `shared` | Minor-unit money helpers; schema validation rules; compile-time schema ⇄ interface equality.                                                                                                                                       |
+| `api`    | Health endpoints, error envelopes, CORS, security headers, request IDs, env validation, the validation convention, graceful shutdown, Prisma enum ⇄ shared literal parity.                                                         |
+| `web`    | API client; exact money/date formatting; navigation rules; the theme bootstrap script (run in a sandbox); budget status; fixtures against shared schemas; `FinancialAmount` and `TransactionRow` rendered with `react-dom/server`. |
 
 Type-level assertions (`expectTypeOf`) are checked by `pnpm typecheck`, not by `pnpm test`.
+
+Web component tests render to static HTML with `react-dom/server` in Vitest's Node environment, so
+no DOM emulation library is needed. Name them `*.test.tsx`.
+
+**Checking the UI by hand.** Use your browser's device toolbar at 320, 375, 430, 768, 1024, and
+1440px, in light and dark themes (Settings → Appearance or the header theme menu). Phones should
+show the bottom bar, tablets the icon rail, and desktops the collapsible sidebar, with no
+horizontal scrolling at any width.
 
 **Before pushing**, run the same gates CI should run:
 
@@ -170,6 +179,10 @@ pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build
   code as `*.test.ts`.
 - **Imports:** in the web app use `@/…` for `src/`; import shared code only from
   `@calmcash/shared`; never import another feature's or module's internals.
+- **UI:** use design tokens (`bg-card`, `text-muted-foreground`, `text-income`, …), never raw
+  colours; build on the components in `components/`; keep Server Components the default; label
+  sample data. Details, including how to add shadcn/ui primitives, are in
+  [ui-architecture.md](./ui-architecture.md).
 
 ## 7. Troubleshooting
 
@@ -189,12 +202,21 @@ The message lists each offending variable by name (values are never printed). Ma
 Create `apps/web/.env.local` from `apps/web/.env.example`. `NEXT_PUBLIC_API_URL` must be an
 origin such as `http://localhost:4000` (no `/api/v1`). Restart `pnpm dev` after changing it.
 
-**The status card shows "API: Offline"**
+**The status card (Settings) shows "API: Offline"**
 The API is not running or not reachable at `NEXT_PUBLIC_API_URL`. Check the `apps/api dev:` lines
 of `pnpm dev`. If the API is up, check that `CORS_ORIGINS` contains the exact origin of the web app
-(scheme, host, and port, with no trailing slash).
+(scheme, host, and port, with no trailing slash). The rest of the app keeps working without the API.
 
-**The status card shows "Database: Unavailable"**
+**`pnpm typecheck` fails in `.next/dev/types/validator.ts` after deleting or renaming a page**
+Those route types were generated by an earlier `next dev` run. Delete `apps/web/.next/dev` (or
+start `pnpm dev` once to regenerate it) and run the type-check again.
+
+**A round "N" badge covers the logo in development**
+That is the Next.js dev-tools indicator. It is placed top-left on purpose (`devIndicators` in
+`next.config.ts`), because the bottom corners would cover the sidebar's collapse control or the
+mobile "More" tab. It does not appear in production builds.
+
+**The status card (Settings) shows "Database: Unavailable"**
 The API cannot reach PostgreSQL. Run `pnpm db:up` and check `DATABASE_URL`. The API reconnects
 automatically, with no restart needed.
 

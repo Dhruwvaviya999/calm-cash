@@ -8,7 +8,9 @@ export default defineConfig({
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
   test: {
+    // Components are tested by rendering them to static HTML with react-dom/server, so no DOM
+    // emulation (and no extra test dependencies) is needed.
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.{ts,tsx}'],
   },
 });

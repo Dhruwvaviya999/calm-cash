@@ -38,7 +38,8 @@ export default defineConfig(
     files: WEB_FILES,
     settings: {
       react: { version: reactPackage.version },
-      next: { rootDir: 'apps/web/' },
+      // Absolute, so the rule works no matter which directory ESLint is started from.
+      next: { rootDir: join(import.meta.dirname, 'apps/web') },
     },
   },
 
@@ -85,6 +86,26 @@ export default defineConfig(
       ],
       '@typescript-eslint/restrict-template-expressions': ['error', { allowNumber: true }],
       '@typescript-eslint/switch-exhaustiveness-check': 'error',
+    },
+  },
+
+  // Prototype fixtures may only feed preview UI (routes and features), never infrastructure or
+  // the reusable design system.
+  {
+    files: ['apps/web/src/{components,hooks,lib,services,types}/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@/fixtures', '@/fixtures/*', '**/fixtures/*'],
+              message:
+                'Sample fixtures are prototype-only and must not reach shared code or services.',
+            },
+          ],
+        },
+      ],
     },
   },
 
