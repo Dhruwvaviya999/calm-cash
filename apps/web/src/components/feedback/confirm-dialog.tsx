@@ -15,8 +15,11 @@ import {
 } from '@/components/ui/alert-dialog';
 
 export interface ConfirmDialogProps {
-  /** The element that opens the dialog, typically a <Button>. */
-  trigger: ReactNode;
+  /** The element that opens the dialog, typically a <Button>. Omit when controlled with `open`. */
+  trigger?: ReactNode;
+  /** Controlled open state, e.g. when opened from a menu item. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   title: string;
   description: string;
   confirmLabel: string;
@@ -32,6 +35,8 @@ export interface ConfirmDialogProps {
  */
 export function ConfirmDialog({
   trigger,
+  open,
+  onOpenChange,
   title,
   description,
   confirmLabel,
@@ -40,8 +45,11 @@ export function ConfirmDialog({
   onConfirm,
 }: ConfirmDialogProps): ReactNode {
   return (
-    <AlertDialog>
-      <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>
+    <AlertDialog
+      {...(open === undefined ? {} : { open })}
+      {...(onOpenChange === undefined ? {} : { onOpenChange })}
+    >
+      {trigger !== undefined && <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>}
       <AlertDialogContent className="rounded-2xl bg-card max-sm:top-auto max-sm:bottom-0 max-sm:left-0 max-sm:max-w-none max-sm:translate-x-0 max-sm:translate-y-0 max-sm:rounded-t-3xl max-sm:rounded-b-none max-sm:pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] max-sm:data-[state=closed]:slide-out-to-bottom max-sm:data-[state=open]:slide-in-from-bottom">
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>

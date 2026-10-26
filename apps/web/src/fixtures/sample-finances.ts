@@ -1,10 +1,11 @@
-import type {
-  AccountDto,
-  CategoryDto,
-  EntityId,
-  IsoDateTimeString,
-  MinorUnitsString,
-  TransactionDto,
+import {
+  getAccountClassification,
+  type AccountDto,
+  type CategoryDto,
+  type EntityId,
+  type IsoDateTimeString,
+  type MinorUnitsString,
+  type TransactionDto,
 } from '@calmcash/shared';
 
 import type { BudgetProgressProps } from '@/features/budgets';
@@ -64,14 +65,17 @@ function account(
     id: sampleId(200 + sequence),
     name,
     type,
+    classification: getAccountClassification(type),
     currency: 'INR',
     openingBalanceMinor,
+    openingBalanceDate: '2026-09-01',
+    status: 'active',
     ...audit,
   };
 }
 
 export const sampleAccounts = {
-  savings: account(1, 'Everyday Savings', 'bank', '18500000'),
+  savings: account(1, 'Everyday Savings', 'savings', '18500000'),
   card: account(2, 'Rewards Credit Card', 'credit_card', '-1250000'),
   wallet: account(3, 'UPI Wallet', 'digital_wallet', '150000'),
   cash: account(4, 'Cash', 'cash', '320000'),

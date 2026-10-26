@@ -3,7 +3,8 @@
 PostgreSQL is the system of record. The schema is defined in
 [`prisma/schema.prisma`](../prisma/schema.prisma); the authoritative DDL — including the CHECK
 constraints Prisma cannot express — is in [`prisma/migrations/`](../prisma/migrations/).
-This document covers the Phase 1 core models and the Phase 3 authentication models.
+This document covers the Phase 1 core models, the Phase 3 authentication models, and the Phase 4
+account-management rules (§3a).
 
 ## 1. Entity relationships
 
@@ -50,10 +51,15 @@ erDiagram
     accounts {
         uuid id PK
         uuid user_id FK
-        varchar name "unique per user"
+        varchar name
         account_type type
         char currency
-        bigint opening_balance_minor "signed"
+        bigint opening_balance_minor "signed net position"
+        date opening_balance_date
+        varchar institution "nullable"
+        bigint credit_limit_minor "credit cards only"
+        account_color color "nullable"
+        timestamptz archived_at "nullable"
     }
     categories {
         uuid id PK
@@ -93,7 +99,7 @@ Every table also has `created_at` and `updated_at` (`timestamptz(3)`).
 | Model         | Purpose                                                                                         |
 | ------------- | ----------------------------------------------------------------------------------------------- |
 | `User`        | Owner of all data. Preferred currency and IANA time zone drive defaults and reporting.          |
-| `Account`     | A place money lives: bank account, cash, card, wallet, investment, or loan.                     |
+| `Account`     | A place money lives (cash, bank, savings, wallet) or a debt (credit card); see §3a.             |
 | `Category`    | User-defined income or expense label. Added in Phase 1 so `categoryId` has a real foreign key.  |
 | `Transaction` | One income, expense, or transfer event.                                                         |
 | `Budget`      | A spending limit per period, for one category or all expenses.                                  |
@@ -119,7 +125,7 @@ Money is the most sensitive data in the system, so it follows strict rules:
 
 1. **Integer minor units in `BIGINT`.** Amounts are stored as the number of minor units (paise
    for INR, cents for USD) in `BIGINT` columns: `opening_balance_minor`, `amount_minor`, and
-   `limit_minor`. There are no `NUMERIC`, `REAL`, or `DOUBLE PRECISION` money columns.
+   `limit_minor`, `credit_limit_minor`. There are no `NUMERIC`, `REAL`, or `DOUBLE PRECISION` money columns.
 2. **Never JavaScript `number`.** `BIGINT` exceeds `Number.MAX_SAFE_INTEGER` (2^53 − 1). Prisma
    returns `BigInt` columns as `bigint`, and code computes with `bigint` only. Floating-point
    arithmetic is never used for money: `0.1 + 0.2 !== 0.3`, but `10n + 20n === 30n`.
@@ -137,7 +143,8 @@ Money is the most sensitive data in the system, so it follows strict rules:
 
    | Column                  | Sign              | Meaning                                           |
    | ----------------------- | ----------------- | ------------------------------------------------- |
-   | `opening_balance_minor` | signed            | Negative for liabilities (credit cards, loans).   |
+   | `opening_balance_minor` | signed            | Net position: negative = owed (cards, overdraft). |
+   | `credit_limit_minor`    | strictly positive | Credit cards only.                                |
    | `amount_minor`          | strictly positive | Direction comes from `type`, never from the sign. |
    | `limit_minor`           | strictly positive | Spending ceiling for one period.                  |
 
@@ -146,6 +153,11 @@ Money is the most sensitive data in the system, so it follows strict rules:
    `CURRENCY_CODES` (`packages/shared/src/constants/currencies.ts`), so supporting a new currency
    needs no migration. Amounts in different currencies are never added together without an
    explicit conversion step (a later phase).
+7. **Exact input.** People type major units ("12,500.50"); `parseDecimalAmount` in
+   `packages/shared/src/money/decimal-input.ts` converts them to minor units with the currency's
+   exponent and **rejects** extra decimal places instead of rounding (`10.005` INR, `10.5` JPY).
+   Entered amounts are limited to ±999,999,999,999,999 minor units (`MAX_ENTERED_AMOUNT_MINOR`),
+   so sums of many of them stay far inside `BIGINT`.
 
 ## 3. Transaction types and balance calculation
 
@@ -176,6 +188,101 @@ Later phases extend the model without changing the rule:
 - **Cross-currency transfers** will add an explicit destination amount and currency instead of
   converting implicitly.
 
+## 3a. Accounts and balance semantics (Phase 4)
+
+### Account types
+
+| `type`           | Classification | Created in the app | Balance may be negative    | Credit limit |
+| ---------------- | -------------- | ------------------ | -------------------------- | ------------ |
+| `cash`           | asset          | yes                | no                         | no           |
+| `bank`           | asset          | yes                | yes (overdraft)            | no           |
+| `savings`        | asset          | yes                | no                         | no           |
+| `digital_wallet` | asset          | yes                | no                         | no           |
+| `credit_card`    | liability      | yes                | yes (that is what is owed) | optional     |
+| `other`          | asset          | yes                | yes                        | no           |
+| `investment`     | asset          | no (Phase 1 value) | yes                        | no           |
+| `loan`           | liability      | no (Phase 1 value) | yes                        | no           |
+
+`CREATABLE_ACCOUNT_TYPES` and `ACCOUNT_TYPE_CLASSIFICATION` in
+`packages/shared/src/constants/accounts.ts` are the single source of these rules. `investment` and
+`loan` stay in the enum for compatibility; tracking them belongs to later phases. Only the bank or
+provider _name_ is stored (`institution`) — never account numbers, card numbers, or credentials.
+
+### One sign convention: the net position
+
+Every balance — opening or current, for every type — is a **signed net position** in minor units:
+positive means money held (or a card in credit), negative means money owed.
+
+| Example                                   | `opening_balance_minor` | Shown as                                      |
+| ----------------------------------------- | ----------------------- | --------------------------------------------- |
+| Savings account with ₹12,500.50           | `1250050`               | Balance ₹12,500.50                            |
+| Bank account overdrawn by ₹2,000          | `-200000`               | Overdrawn ₹2,000.00                           |
+| Credit card owing ₹12,500 (limit ₹1 lakh) | `-1250000`              | Amount owed ₹12,500.00 · ₹87,500.00 available |
+
+With one convention, one formula serves every account, and a transfer is always money leaving one
+balance and entering another. `classification` (in every `AccountDto`) tells clients how to present
+it: liabilities report `amountOwedMinor` (the negated position) and, for credit cards with a limit,
+`availableCreditMinor = limit − owed` (negative when over the limit). The web form asks credit cards
+for the _amount owed_ as a positive number and stores its negation.
+
+**Never one ambiguous total.** Totals are per currency and keep assets (`assetsMinor`, money held;
+an overdraft reduces it) and liabilities (`liabilitiesMinor`, money owed; a card in credit reduces
+it) side by side. They are never netted into a "balance", and currencies are never added together.
+
+### Opening balance and current balance
+
+- `opening_balance_minor` is the net position **at the start of** `opening_balance_date`, a calendar
+  date interpreted in the owner's time zone (`users.timezone`). It is required when an account is
+  created, so zero is always deliberate; the date defaults to today and cannot be in the future.
+- **Current balance** = opening balance + the signed effect of every _counted_ transaction:
+
+  ```text
+  current(A) = opening_balance_minor(A)
+             + Σ income     on A
+             − Σ expense    on A
+             − Σ transfer   where A is the source        (account_id = A)
+             + Σ transfer   where A is the destination   (transfer_account_id = A)
+  ```
+
+  A transaction counts when it belongs to the account's owner, has the account's currency, and its
+  `occurred_at` is on or after the start of the opening date in the owner's time zone. Earlier rows
+  are history from before tracking began. Transfers only move money; they never count as income or
+  spending. Archived accounts keep computing their balance from their history.
+
+- The arithmetic lives only in `apps/api/src/modules/accounts/account-balance.ts` (pure, tested).
+  `accounts.repository.ts` (`movementTotals`) supplies per-account sums in **one aggregate query**
+  for the user (`SUM` over `BIGINT` yields `NUMERIC`, returned as text and parsed to `bigint`, so no
+  step can overflow or round). Nothing else calculates balances: controllers and the web app only
+  display them. If the owner later changes their time zone, the start of the opening date moves
+  with it.
+
+### Opening-balance corrections
+
+Until any transaction uses the account (as source or destination), the opening balance, its date,
+and the currency can be corrected freely; a currency change must restate the opening balance and
+credit limit in the new currency. **Once a transaction exists, those three fields are locked**
+(`409 CONFLICT`), because changing them would silently change which transactions count and what
+the history means. Phase 5 will provide explicit balance-adjustment transactions for corrections.
+Edits run in a database transaction that first locks the account row (`SELECT … FOR UPDATE`), so
+the "has transactions" decision cannot go stale; Phase 5 transaction writes must lock the same row.
+Other details (name, provider, colour, and type within the same classification) stay editable.
+
+### Archiving
+
+`archived_at` marks an account as archived: it leaves the default list and the summary, cannot be
+edited until restored, and (from Phase 5) cannot receive new transactions. Nothing is deleted —
+transactions, opening balance, and balance stay intact, and restoring returns the account as it was.
+Archive and restore are idempotent (repeating them changes nothing and returns the same state).
+There is no hard delete: `transactions.account_id` uses `NO ACTION`, so an account with history can
+never be removed while its user exists.
+
+### Names are not unique
+
+Phase 1 had a unique `(user_id, name)` constraint. Phase 4 removes it: two accounts may legitimately
+share a name ("Cash" at home and in a wallet, two banks' "Credit card"), and an archived account's
+name must be reusable. The UI tells accounts apart by type, provider, and currency. The index
+`(user_id, archived_at)` replaces it for "accounts of a user" lookups by status.
+
 ## 4. Integrity rules
 
 ### Constraints
@@ -190,7 +297,10 @@ Later phases extend the model without changing the rule:
 | `sessions`     | `sessions_expiry_after_creation_check`                                 | `expires_at > created_at`.                                                     |
 | `auth_tokens`  | `auth_tokens_token_hash_key` (unique)                                  | One token per hash; looked up by hash on consumption.                          |
 | `auth_tokens`  | `auth_tokens_token_hash_format_check`, `…_expiry_after_creation_check` | Hex digest; coherent lifetime.                                                 |
-| `accounts`     | `accounts_user_id_name_key` (unique)                                   | Account names are unique per user.                                             |
+| `accounts`     | `accounts_credit_limit_check`                                          | `credit_limit_minor` is null, or positive on a `credit_card`.                  |
+| `accounts`     | `accounts_institution_not_blank_check`                                 | A provider name, if present, is not blank.                                     |
+| `accounts`     | `accounts_opening_balance_date_check`                                  | `opening_balance_date >= 1900-01-01`.                                          |
+| `accounts`     | `accounts_archived_after_creation_check`                               | `archived_at` is null or not before `created_at`.                              |
 | `categories`   | `categories_user_id_kind_name_key` (unique)                            | Category names are unique per user and kind.                                   |
 | `transactions` | `transactions_amount_minor_positive_check`                             | `amount_minor > 0`.                                                            |
 | `transactions` | `transactions_transfer_shape_check`                                    | Transfers: destination present, ≠ source, no category. Others: no destination. |
@@ -199,6 +309,11 @@ Later phases extend the model without changing the rule:
 | `budgets`      | `budgets_custom_period_end_date_check`                                 | `custom` periods require an `end_date`.                                        |
 | all            | `*_currency_format_check`                                              | `currency ~ '^[A-Z]{3}$'`.                                                     |
 | all            | `*_name_not_blank_check` / `*_description_not_blank_check`             | Text identifiers cannot be blank.                                              |
+
+Type-dependent balance rules (no negative cash, savings, or wallet balances) are enforced by the
+shared `accountRuleViolations` on every create and update, including the merged state of a partial
+update, rather than by a CHECK constraint: they reference the `savings` value added in the same
+migration, which PostgreSQL does not allow.
 
 These rules are also validated earlier, at the API edge with Zod. The database copy is the last
 line of defence against a buggy code path or a manual query.
@@ -244,7 +359,7 @@ database level later if needed.
   | `sessions (user_id)`                                | A user's sessions (list, revoke others).             |
   | `sessions (expires_at)`, `auth_tokens (expires_at)` | Cleanup of ended records.                            |
   | `auth_tokens (user_id, purpose)`                    | Replacing a user's outstanding tokens.               |
-  | unique `accounts (user_id, name)`                   | Also serves "accounts of a user".                    |
+  | `accounts (user_id, archived_at)`                   | A user's accounts, filtered by status (Phase 4).     |
   | unique `categories (user_id, kind, name)`           | Also serves "categories of a user".                  |
 
 ## 6. Database models vs. API DTOs
@@ -277,6 +392,11 @@ literal unions are identical, both at runtime and at the type level.
 - **Phase 3 migration** (`20261026041933_add_authentication`) is purely additive: two nullable
   `users` columns, the `sessions` and `auth_tokens` tables, and CHECK constraints. Existing users and
   financial data are untouched; a user without a password sets one through password reset.
+- **Phase 4 migration** (`*_account_management`) adds the `savings` type, the `account_color` enum,
+  `opening_balance_date` (backfilled from each account's creation day in its owner's time zone, then
+  `NOT NULL`), `institution`, `credit_limit_minor`, `color`, and `archived_at` with CHECK
+  constraints, and replaces the unique name index with `(user_id, archived_at)`. No existing value
+  changes apart from the backfill.
 - **Check for drift:**
   `pnpm exec prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code`
   exits with 0 when the database matches the schema.

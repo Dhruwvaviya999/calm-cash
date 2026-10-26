@@ -10,6 +10,7 @@ import { createErrorHandler } from './middleware/error-handler';
 import { notFoundHandler } from './middleware/not-found';
 import { createOriginCheck } from './middleware/origin-check';
 import { createRequestLogger } from './middleware/request-logger';
+import type { AccountsModuleDependencies } from './modules/accounts/accounts.routes';
 import type { AuthModuleDependencies } from './modules/auth/auth.routes';
 import { createV1Router } from './routes/v1';
 
@@ -21,6 +22,7 @@ export interface AppDependencies {
   logger: Logger;
   checkDatabase: DatabaseHealthCheck;
   auth: AuthModuleDependencies;
+  accounts: AccountsModuleDependencies;
 }
 
 /**
@@ -28,7 +30,13 @@ export interface AppDependencies {
  * Middleware order matters: logging/request ID → security headers → CORS → origin check →
  * body parsing → routes → 404 → error handler.
  */
-export function createApp({ config, logger, checkDatabase, auth }: AppDependencies): Express {
+export function createApp({
+  config,
+  logger,
+  checkDatabase,
+  auth,
+  accounts,
+}: AppDependencies): Express {
   const app = express();
 
   app.disable('x-powered-by');
@@ -55,6 +63,7 @@ export function createApp({ config, logger, checkDatabase, auth }: AppDependenci
     createV1Router({
       checkDatabase,
       auth,
+      accounts,
       authConfig: { session: config.session, webAppUrl: config.webAppUrl },
     }),
   );

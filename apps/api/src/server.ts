@@ -7,6 +7,7 @@ import { createDatabaseHealthCheck, createPrismaClient } from './lib/database';
 import { createSmtpEmailService } from './lib/email';
 import { createLogger } from './lib/logger';
 import { registerGracefulShutdown } from './lib/shutdown';
+import { createPrismaAccountsRepository } from './modules/accounts/accounts.repository';
 import { createPrismaAuthRepository } from './modules/auth/auth.repository';
 import { createArgon2PasswordHasher } from './modules/auth/password-hasher';
 import { scheduleSessionCleanup } from './modules/auth/session-cleanup';
@@ -45,6 +46,7 @@ const app = createApp({
     emailService,
     backgroundTasks,
   },
+  accounts: { repository: createPrismaAccountsRepository(prisma) },
 });
 
 const stopSessionCleanup = scheduleSessionCleanup({

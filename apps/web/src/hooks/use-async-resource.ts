@@ -4,14 +4,16 @@ import type { AsyncState } from '@/types/async-state';
 
 export interface AsyncResource<TData> {
   state: AsyncState<TData>;
-  /** Discards the current result and loads again. */
+  /** Discards the current result and loads again (shows the loading state). */
   reload: () => void;
+  /** Loads again in the background, keeping the current result on screen until it arrives. */
+  refresh: () => void;
 }
 
 /**
- * Loads data on mount (client-side) and on `reload()`, aborting the in-flight request when the
- * component unmounts or a reload starts. `load` must be referentially stable, e.g. a module-level
- * function, otherwise every render would trigger a new request.
+ * Loads data on mount (client-side) and on `reload()`/`refresh()`, aborting the in-flight request
+ * when the component unmounts or another load starts. `load` must be referentially stable, e.g. a
+ * module-level function or a `useCallback`, otherwise every render would trigger a new request.
  */
 export function useAsyncResource<TData>(
   load: (signal: AbortSignal) => Promise<TData>,
@@ -45,5 +47,9 @@ export function useAsyncResource<TData>(
     setAttempt((current) => current + 1);
   }, []);
 
-  return { state, reload };
+  const refresh = useCallback(() => {
+    setAttempt((current) => current + 1);
+  }, []);
+
+  return { state, reload, refresh };
 }

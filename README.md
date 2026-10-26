@@ -3,11 +3,12 @@
 CalmCash is an AI-powered personal finance tracker. The roadmap covers transaction management,
 budgeting, bank statement imports, financial analytics, AI insights, and recurring payments.
 
-> **Status — Phase 3 (authentication, profiles, and security) complete.** On top of the Phase 1
-> foundation and the Phase 2 design system, people can register, confirm their e-mail address,
-> sign in with server-side sessions, recover and change passwords, manage their signed-in devices,
-> and edit their profile. Every in-app page requires a signed-in user. Financial screens still show
-> clearly labelled sample data; real accounts arrive in Phase 4.
+> **Status — Phase 4 (financial models and account management) complete.** On top of the
+> foundation, design system, and authentication of Phases 1–3, people can add, edit, archive, and
+> restore their cash, bank, savings, wallet, and credit-card accounts with exact opening balances,
+> and see what they hold and what they owe per currency. The Accounts page uses live data; the
+> dashboard, transactions, budgets, and insights still show clearly labelled sample data until
+> transactions arrive in Phase 5.
 
 ## Tech stack
 
@@ -34,7 +35,7 @@ calmcash/
 │   │       ├── config/      Validated environment configuration
 │   │       ├── lib/         Database client, logger, errors, request IDs, shutdown
 │   │       ├── middleware/  Request logging, validation, 404, error handler
-│   │       ├── modules/     Feature modules (health, auth)
+│   │       ├── modules/     Feature modules (health, auth, accounts)
 │   │       └── routes/      Versioned routers (/api/v1)
 │   └── web/                 Next.js web app (TypeScript)
 │       └── src/

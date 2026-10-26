@@ -4,6 +4,7 @@ import { pino } from 'pino';
 import { createApp, type AppDependencies } from '../app';
 import { createBackgroundTasks } from '../lib/background-tasks';
 import { createPrismaClient } from '../lib/database';
+import { createPrismaAccountsRepository } from '../modules/accounts/accounts.repository';
 import { createPrismaAuthRepository } from '../modules/auth/auth.repository';
 import { createArgon2PasswordHasher } from '../modules/auth/password-hasher';
 import { createInMemoryEmailService } from './in-memory-email';
@@ -52,11 +53,17 @@ export function createOfflineAuthDependencies(
 
 /** Builds the real application with silent logging and a stubbed database check. */
 export function createTestApp(overrides: Partial<AppDependencies> = {}): Express {
+  const logger = pino({ level: 'silent' });
   return createApp({
     config: TEST_APP_CONFIG,
-    logger: pino({ level: 'silent' }),
+    logger,
     checkDatabase: () => Promise.resolve(true),
     auth: createOfflineAuthDependencies(),
+    accounts: {
+      repository: createPrismaAccountsRepository(
+        createPrismaClient('postgresql://offline:offline@127.0.0.1:9/offline', logger),
+      ),
+    },
     ...overrides,
   });
 }

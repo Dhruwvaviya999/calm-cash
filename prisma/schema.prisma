@@ -19,9 +19,11 @@ datasource db {
   provider = "postgresql"
 }
 
+/// `investment` and `loan` are kept from Phase 1; new accounts use the other types (API-enforced).
 enum AccountType {
   cash
   bank
+  savings
   credit_card
   digital_wallet
   investment
@@ -29,6 +31,18 @@ enum AccountType {
   other
 
   @@map("account_type")
+}
+
+/// Optional accent colour of an account, mapped to design tokens by the web app.
+enum AccountColor {
+  green
+  blue
+  amber
+  purple
+  coral
+  slate
+
+  @@map("account_color")
 }
 
 enum TransactionType {
@@ -139,22 +153,33 @@ model AuthToken {
 }
 
 model Account {
-  id                  String      @id @default(uuid(7)) @db.Uuid
-  userId              String      @map("user_id") @db.Uuid
-  name                String      @db.VarChar(100)
+  id                  String        @id @default(uuid(7)) @db.Uuid
+  userId              String        @map("user_id") @db.Uuid
+  /// Not unique: two accounts may share a name, and an archived account's name can be reused.
+  name                String        @db.VarChar(100)
   type                AccountType
-  currency            String      @db.Char(3)
-  /// Signed balance in minor units when tracking started. Negative for liabilities (cards, loans).
-  openingBalanceMinor BigInt      @default(0) @map("opening_balance_minor")
-  createdAt           DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt           DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+  currency            String        @db.Char(3)
+  /// Signed net position in minor units at the start of `openingBalanceDate`: positive = money
+  /// held, negative = money owed (credit cards, overdrafts).
+  openingBalanceMinor BigInt        @default(0) @map("opening_balance_minor")
+  /// Calendar day, in the owner's time zone, from which transactions count toward the balance.
+  openingBalanceDate  DateTime      @map("opening_balance_date") @db.Date
+  /// Bank or provider name. Account and card numbers are never stored.
+  institution         String?       @db.VarChar(100)
+  /// Credit cards only (CHECK constraint): positive limit in minor units of `currency`.
+  creditLimitMinor    BigInt?       @map("credit_limit_minor")
+  color               AccountColor?
+  /// Set while the account is archived: hidden, closed to new activity, history kept.
+  archivedAt          DateTime?     @map("archived_at") @db.Timestamptz(3)
+  createdAt           DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   transactions      Transaction[] @relation("TransactionAccount")
   incomingTransfers Transaction[] @relation("TransactionTransferAccount")
 
-  // Also serves as the lookup index for "accounts of a user".
-  @@unique([userId, name])
+  // "Accounts of a user", optionally by status (active means archived_at IS NULL).
+  @@index([userId, archivedAt])
   @@map("accounts")
 }
 

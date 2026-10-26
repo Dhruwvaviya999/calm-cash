@@ -1,4 +1,10 @@
-import type { AccountType, CategoryDto, TransactionType } from '@calmcash/shared';
+import type {
+  AccountClassification,
+  AccountColor,
+  AccountType,
+  CategoryDto,
+  TransactionType,
+} from '@calmcash/shared';
 import {
   Banknote,
   Briefcase,
@@ -17,6 +23,7 @@ import {
   Tag,
   TrendingUp,
   UtensilsCrossed,
+  Vault,
   Wallet,
   Zap,
   type LucideIcon,
@@ -28,17 +35,72 @@ import {
 export interface AccountTypePresentation {
   label: string;
   icon: LucideIcon;
+  /** One-line explanation shown when choosing a type. */
+  description: string;
 }
 
 export const ACCOUNT_TYPE_PRESENTATION: Readonly<Record<AccountType, AccountTypePresentation>> = {
-  bank: { label: 'Bank account', icon: Landmark },
-  credit_card: { label: 'Credit card', icon: CreditCard },
-  cash: { label: 'Cash', icon: Banknote },
-  digital_wallet: { label: 'Digital wallet', icon: Smartphone },
-  investment: { label: 'Investment', icon: TrendingUp },
-  loan: { label: 'Loan', icon: HandCoins },
-  other: { label: 'Other', icon: Wallet },
+  bank: { label: 'Bank account', icon: Landmark, description: 'Current or salary account' },
+  savings: { label: 'Savings account', icon: Vault, description: 'Money set aside at a bank' },
+  credit_card: { label: 'Credit card', icon: CreditCard, description: 'Tracks what you owe' },
+  cash: { label: 'Cash', icon: Banknote, description: 'Notes and coins you carry' },
+  digital_wallet: {
+    label: 'Digital wallet',
+    icon: Smartphone,
+    description: 'UPI apps and prepaid wallets',
+  },
+  investment: { label: 'Investment', icon: TrendingUp, description: 'Investment account' },
+  loan: { label: 'Loan', icon: HandCoins, description: 'Money borrowed' },
+  other: { label: 'Other account', icon: Wallet, description: 'Any other place money lives' },
 };
+
+export const ACCOUNT_CLASSIFICATION_LABELS: Readonly<Record<AccountClassification, string>> = {
+  asset: 'Money you hold',
+  liability: 'Money you owe',
+};
+
+export interface AccountColorPresentation {
+  label: string;
+  /** Tinted icon tile. Static class names, so Tailwind can detect them. */
+  tileClassName: string;
+  /** Solid swatch for the colour picker. */
+  swatchClassName: string;
+}
+
+/** Account accents reuse the chart palette, whose contrast is checked in both themes. */
+export const ACCOUNT_COLOR_PRESENTATION: Readonly<Record<AccountColor, AccountColorPresentation>> =
+  {
+    green: {
+      label: 'Green',
+      tileClassName: 'bg-chart-1/12 text-chart-1',
+      swatchClassName: 'bg-chart-1',
+    },
+    blue: {
+      label: 'Blue',
+      tileClassName: 'bg-chart-2/12 text-chart-2',
+      swatchClassName: 'bg-chart-2',
+    },
+    amber: {
+      label: 'Amber',
+      tileClassName: 'bg-chart-3/15 text-chart-3',
+      swatchClassName: 'bg-chart-3',
+    },
+    purple: {
+      label: 'Purple',
+      tileClassName: 'bg-chart-4/12 text-chart-4',
+      swatchClassName: 'bg-chart-4',
+    },
+    coral: {
+      label: 'Coral',
+      tileClassName: 'bg-chart-5/12 text-chart-5',
+      swatchClassName: 'bg-chart-5',
+    },
+    slate: {
+      label: 'Slate',
+      tileClassName: 'bg-muted text-muted-foreground',
+      swatchClassName: 'bg-muted-foreground',
+    },
+  };
 
 export const TRANSACTION_TYPE_LABELS: Readonly<Record<TransactionType, string>> = {
   income: 'Credit',

@@ -1,8 +1,9 @@
 # CalmCash architecture
 
 This document describes how the CalmCash codebase is organised, how its parts communicate, and the
-rules that keep features decoupled as the product grows. It reflects the Phase 1 foundation and the
-Phase 3 authentication layer (detailed in [authentication.md](./authentication.md)).
+rules that keep features decoupled as the product grows. It reflects the Phase 1 foundation, the
+Phase 3 authentication layer (detailed in [authentication.md](./authentication.md)), and the
+Phase 4 accounts module.
 
 ## 1. Overview
 
@@ -42,7 +43,7 @@ apps/
     config/env.ts          Typed, validated runtime configuration
     lib/                   Cross-cutting infrastructure (errors, logging, DB client, e-mail, background tasks, shutdown, …)
     middleware/            Request logging, origin check, validation convention, 404, error handler
-    modules/<feature>/     Feature modules (routes → controller → service → repository): health, auth
+    modules/<feature>/     Feature modules (routes → controller → service → repository): health, auth, accounts
     testing/               Test app factories, in-memory e-mail, integration-database harness
     routes/v1.ts           Composition root of API v1: mounts every module router
     generated/prisma/      Generated Prisma Client (git-ignored; `pnpm db:generate`)
@@ -323,6 +324,41 @@ Rules that keep modules independent:
   take typed props, so later phases replace fixtures with API data without touching the shell.
 - **PWA:** `metadata`, `viewport.themeColor`, safe-area padding, and an app icon are in place;
   a web manifest (`app/manifest.ts`) and service worker are deliberately left for the PWA phase.
-- **Authentication (Phase 3, done):** see [authentication.md](./authentication.md). Future modules
-  get the caller only through `getAuthContext(req)` after `requireSession` (and `requireCsrf` for
-  mutations) and must scope every query by that user ID.
+- **Authentication (Phase 3, done):** see [authentication.md](./authentication.md).
+- **Accounts (Phase 4, done):** see [§13](#13-accounts-module-phase-4) and the balance rules in
+  [database-design.md](./database-design.md#3a-accounts-and-balance-semantics-phase-4).
+- **Transactions (Phase 5):** the transactions module must reuse `account-balance.ts` and
+  `movementTotals` (never a second balance formula), verify that every referenced account belongs
+  to the caller, is active, and has the same currency, lock the account row(s) with
+  `SELECT … FOR UPDATE` in the same database transaction (the opening-balance lock relies on it),
+  and add balance-adjustment transactions for corrections once history exists.
+
+## 13. Accounts module (Phase 4)
+
+Protected modules receive the session boundary from the auth module through the composition root
+(`routes/v1.ts`): `requireSession`, `requireCsrf`, and `getCaller(req) → { userId, timeZone }`.
+The accounts module never reads cookies or imports auth internals, and it never takes an owner
+from the request: every query is scoped by `getCaller(req).userId`.
+
+| Method & path                       | Purpose                                                            | Success |
+| ----------------------------------- | ------------------------------------------------------------------ | ------- |
+| `GET /accounts`                     | List (`?status=active\|archived\|all`, default `active`; `?type=`) | 200     |
+| `GET /accounts/summary`             | Active totals per currency: assets and liabilities apart           | 200     |
+| `POST /accounts`                    | Create                                                             | 201     |
+| `GET /accounts/:accountId`          | One account with its balance                                       | 200     |
+| `PATCH /accounts/:accountId`        | Update (partial; `null` clears optional fields)                    | 200     |
+| `POST /accounts/:accountId/archive` | Archive (idempotent)                                               | 200     |
+| `POST /accounts/:accountId/restore` | Restore (idempotent)                                               | 200     |
+
+- Every route requires a session; state-changing routes also require the CSRF token, and all
+  responses are `Cache-Control: no-store`.
+- Bodies are strict Zod objects from `packages/shared/src/schemas/account.ts` (unknown fields such
+  as `userId`, `status`, or `archivedAt` are rejected); path IDs must be UUIDs.
+- An account that does not exist and one that belongs to someone else both answer
+  `404 NOT_FOUND` with the same message.
+- Responses are `AccountWithBalanceDto` (`{ account, balance, hasTransactions }`); lists are
+  ordered active first, then by creation time.
+- Layout: `account-balance.ts` (pure balance math) · `accounts.repository.ts` (Prisma, one
+  aggregate SQL for balances, row-locked updates) · `accounts.service.ts` (rules, edit policy) ·
+  `accounts.mapper.ts` (row → DTO) · `accounts.controller.ts` · `accounts.routes.ts`.
+- Logs contain only the method, URL, status, and request ID — never balances or account details.

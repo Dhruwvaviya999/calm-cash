@@ -13,6 +13,10 @@ import { afterAll, beforeEach, expect } from 'vitest';
 import { createApp } from '../app';
 import { createBackgroundTasks, type BackgroundTasks } from '../lib/background-tasks';
 import { createPrismaClient, type PrismaClient } from '../lib/database';
+import {
+  createPrismaAccountsRepository,
+  type AccountsRepository,
+} from '../modules/accounts/accounts.repository';
 import type { AuthRateLimits, RateLimitRule } from '../modules/auth/auth.rate-limits';
 import { createPrismaAuthRepository, type AuthRepository } from '../modules/auth/auth.repository';
 import { createArgon2PasswordHasher } from '../modules/auth/password-hasher';
@@ -66,6 +70,8 @@ export interface TestContext {
 
 export interface TestContextOptions {
   rateLimits?: Partial<AuthRateLimits>;
+  /** Wraps the real accounts repository, e.g. to simulate database failures. */
+  accountsRepository?: (real: AccountsRepository) => AccountsRepository;
 }
 
 /**
@@ -107,6 +113,12 @@ export function useIntegrationDatabase(): {
           backgroundTasks: tasks,
           now: clock.now,
           rateLimits: { ...UNLIMITED_RATE_LIMITS, ...options.rateLimits },
+        },
+        accounts: {
+          repository: (options.accountsRepository ?? ((real) => real))(
+            createPrismaAccountsRepository(prisma),
+          ),
+          now: clock.now,
         },
       });
       return { app, prisma, repository, email, clock, tasks };

@@ -9,7 +9,7 @@ import {
   updateProfileInputSchema,
   verifyEmailInputSchema,
 } from '@calmcash/shared';
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 import { z } from 'zod';
 
 import type { SessionConfig } from '../../config/env';
@@ -17,7 +17,7 @@ import type { BackgroundTasks } from '../../lib/background-tasks';
 import type { EmailService } from '../../lib/email';
 import { validateRequest } from '../../middleware/validate-request';
 import { createAuthController } from './auth.controller';
-import { createRequireCsrf, createRequireSession } from './auth.middleware';
+import { createRequireCsrf, createRequireSession, getAuthContext } from './auth.middleware';
 import {
   createAuthRateLimiters,
   DEFAULT_AUTH_RATE_LIMITS,
@@ -42,6 +42,17 @@ export interface AuthModuleConfig {
   webAppUrl: string;
 }
 
+/** What other modules get from authentication: the router and the signed-in-user boundary. */
+export interface AuthModule {
+  router: Router;
+  /** 401 unless the request carries a valid session; mount before any protected handler. */
+  requireSession: RequestHandler;
+  /** 403 unless state-changing requests carry the session's CSRF token. */
+  requireCsrf: RequestHandler;
+  /** The signed-in caller of a request that passed `requireSession`. */
+  getCaller: (req: object) => { userId: string; timeZone: string };
+}
+
 const body = <TSchema extends z.ZodType>(schema: TSchema): z.ZodObject<{ body: TSchema }> =>
   z.object({ body: schema });
 
@@ -54,10 +65,10 @@ const sessionIdParams = z.object({ params: z.object({ sessionId: entityIdSchema 
  *           POST /sessions/revoke-others, DELETE /sessions/:sessionId
  * Every state-changing signed-in route also requires the session's CSRF token.
  */
-export function createAuthRouter(
+export function createAuthModule(
   dependencies: AuthModuleDependencies,
   config: AuthModuleConfig,
-): Router {
+): AuthModule {
   const now = dependencies.now ?? ((): Date => new Date());
   const service = createAuthService({
     repository: dependencies.repository,
@@ -141,5 +152,13 @@ export function createAuthRouter(
     validateRequest(sessionIdParams, controller.revokeSession),
   );
 
-  return router;
+  return {
+    router,
+    requireSession,
+    requireCsrf,
+    getCaller: (req) => {
+      const { user } = getAuthContext(req);
+      return { userId: user.id, timeZone: user.timezone };
+    },
+  };
 }

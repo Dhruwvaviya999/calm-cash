@@ -1,8 +1,10 @@
 import {
+  ACCOUNT_COLORS,
   ACCOUNT_TYPES,
   BUDGET_PERIODS,
   CATEGORY_KINDS,
   TRANSACTION_TYPES,
+  type AccountColor,
   type AccountType,
   type BudgetPeriod,
   type CategoryKind,
@@ -17,6 +19,7 @@ import * as PrismaEnums from '../generated/prisma/enums';
 describe('Prisma enums ⇄ shared domain literals', () => {
   it('have identical runtime values', () => {
     expect(Object.values(PrismaEnums.AccountType)).toEqual([...ACCOUNT_TYPES]);
+    expect(Object.values(PrismaEnums.AccountColor)).toEqual([...ACCOUNT_COLORS]);
     expect(Object.values(PrismaEnums.TransactionType)).toEqual([...TRANSACTION_TYPES]);
     expect(Object.values(PrismaEnums.CategoryKind)).toEqual([...CATEGORY_KINDS]);
     expect(Object.values(PrismaEnums.BudgetPeriod)).toEqual([...BUDGET_PERIODS]);
@@ -24,6 +27,7 @@ describe('Prisma enums ⇄ shared domain literals', () => {
 
   it('have identical types', () => {
     expectTypeOf<PrismaEnums.AccountType>().toEqualTypeOf<AccountType>();
+    expectTypeOf<PrismaEnums.AccountColor>().toEqualTypeOf<AccountColor>();
     expectTypeOf<PrismaEnums.TransactionType>().toEqualTypeOf<TransactionType>();
     expectTypeOf<PrismaEnums.CategoryKind>().toEqualTypeOf<CategoryKind>();
     expectTypeOf<PrismaEnums.BudgetPeriod>().toEqualTypeOf<BudgetPeriod>();

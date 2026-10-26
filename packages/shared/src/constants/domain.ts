@@ -1,9 +1,14 @@
 // Literal values shared by the database enums (prisma/schema.prisma), the API, and the web app.
 // The API test suite asserts that the generated Prisma enums stay identical to these lists.
 
+/**
+ * Every account type the database can hold. `investment` and `loan` date from Phase 1 and are kept
+ * for compatibility, but new accounts can only use `CREATABLE_ACCOUNT_TYPES` (constants/accounts).
+ */
 export const ACCOUNT_TYPES = [
   'cash',
   'bank',
+  'savings',
   'credit_card',
   'digital_wallet',
   'investment',
@@ -35,6 +40,7 @@ export const TEXT_LIMITS = {
   email: 254,
   timezone: 64,
   accountName: 100,
+  accountInstitution: 100,
   categoryName: 50,
   budgetName: 100,
   transactionDescription: 255,

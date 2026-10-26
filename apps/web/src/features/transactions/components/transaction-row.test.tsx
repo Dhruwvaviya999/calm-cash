@@ -13,9 +13,12 @@ const audit = {
 const savings: AccountDto = {
   id: '0193a000-0000-7000-8000-000000000201',
   name: 'Everyday Savings',
-  type: 'bank',
+  type: 'savings',
+  classification: 'asset',
   currency: 'INR',
   openingBalanceMinor: '0',
+  openingBalanceDate: '2026-10-01',
+  status: 'active',
   ...audit,
 };
 
@@ -24,6 +27,7 @@ const card: AccountDto = {
   id: '0193a000-0000-7000-8000-000000000202',
   name: 'Rewards Card',
   type: 'credit_card',
+  classification: 'liability',
 };
 
 const groceries: CategoryDto = {

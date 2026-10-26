@@ -3,7 +3,7 @@
 How the web app (`apps/web`) is designed and built: the visual identity, design tokens, the
 responsive application shell, the component system, and the rules that let later phases replace
 prototype screens without rewriting the shell. Established in Phase 2; Phase 3 added the
-authentication pages, route protection, and real account settings.
+authentication pages, route protection, and real account settings; Phase 4 made Accounts live.
 
 ## 1. Design principles
 
@@ -129,15 +129,15 @@ Accessible primitives come from **shadcn/ui** (new-york style, Radix UI, `compon
 They are owned source files in `components/ui/` and were adapted to the project's lint rules
 (explicit return types, `import type`, local `cn`). CalmCash components build on them:
 
-| Area     | Component                                                                                                                                                                                | Responsibility                                                                                    |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| ui       | `button`, `badge`, `card`, `input`, `skeleton`, `separator`, `avatar`, `tooltip`, `dropdown-menu`, `sheet`, `alert-dialog`, `native-select`                                              | Primitives (shadcn/ui; `native-select` is a styled native `<select>`).                            |
-| brand    | `Wordmark`                                                                                                                                                                               | Logo treatment.                                                                                   |
-| layout   | `AppShell`, `AuthShell`, `DesktopSidebar`, `MobileBottomNav`, `MobileMoreMenu`, `AppHeader`, `HeaderContext`, `PageContainer`, `PageHeader`, `SectionHeader`, `SectionLink`, `PageShell` | Shell, navigation, page structure.                                                                |
-| theme    | `ThemeToggle`, `PreferencesScript`, `PreferencesSync`                                                                                                                                    | Theme menu and preference plumbing.                                                               |
-| feedback | `StatusBadge`, `EmptyState`, `PlannedCapabilities`, `ErrorState`, `PageSkeleton`, `ListSkeleton`, `ConfirmDialog`, `PreviewNotice`                                                       | States and messaging.                                                                             |
-| finance  | `FinancialAmount`, `StatCard`, `ProgressMeter`, `CategoryIcon`                                                                                                                           | Money display patterns.                                                                           |
-| forms    | `SearchInput`, `FilterBar`, `FilterOptions`, `FormField`, `PasswordInput`, `FormMessage`                                                                                                 | Search, filters, labelled fields with hints and errors, show/hide passwords, form-level feedback. |
+| Area     | Component                                                                                                                                                                                | Responsibility                                                                                                       |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| ui       | `button`, `badge`, `card`, `input`, `skeleton`, `separator`, `avatar`, `tooltip`, `dropdown-menu`, `sheet`, `alert-dialog`, `native-select`                                              | Primitives (shadcn/ui; `native-select` is a styled native `<select>`).                                               |
+| brand    | `Wordmark`                                                                                                                                                                               | Logo treatment.                                                                                                      |
+| layout   | `AppShell`, `AuthShell`, `DesktopSidebar`, `MobileBottomNav`, `MobileMoreMenu`, `AppHeader`, `HeaderContext`, `PageContainer`, `PageHeader`, `SectionHeader`, `SectionLink`, `PageShell` | Shell, navigation, page structure.                                                                                   |
+| theme    | `ThemeToggle`, `PreferencesScript`, `PreferencesSync`                                                                                                                                    | Theme menu and preference plumbing.                                                                                  |
+| feedback | `StatusBadge`, `EmptyState`, `PlannedCapabilities`, `ErrorState`, `PageSkeleton`, `ListSkeleton`, `ConfirmDialog`, `PreviewNotice`                                                       | States and messaging.                                                                                                |
+| finance  | `FinancialAmount`, `StatCard`, `ProgressMeter`, `CategoryIcon`                                                                                                                           | Money display patterns.                                                                                              |
+| forms    | `SearchInput`, `FilterBar`, `FilterOptions`, `FormField`, `PasswordInput`, `MoneyInput`, `FormMessage`                                                                                   | Search, filters, labelled fields with hints and errors, show/hide passwords, exact money entry, form-level feedback. |
 
 Feature modules (`features/<feature>/`, public API in `index.ts`):
 
@@ -145,7 +145,7 @@ Feature modules (`features/<feature>/`, public API in `index.ts`):
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `transactions`  | `TransactionRow`, `TransactionList`, `TransactionExplorer` (client filter over server-rendered rows), `TransactionListItem`                                                                              |
 | `budgets`       | `BudgetProgress`, `getBudgetStatus` (on track / close to limit / over budget)                                                                                                                            |
-| `accounts`      | `AccountCard`                                                                                                                                                                                            |
+| `accounts`      | `AccountsOverview` (live page), `AccountCard`, `AccountBalance`, `AccountsSummary`, `AccountForm`/`AccountFormSheet`, `AccountDetailsSheet`; `account-form-model.ts` (text ⇄ exact minor units)          |
 | `dashboard`     | `BalanceOverview`, `SummaryStats`, `SpendingOverview`, `RecentTransactions`, `BudgetOverview`, view-model types                                                                                          |
 | `auth`          | `AuthProvider`/`useAuth` (session lifecycle), `RequireAuth`, `GuestOnly`, `LoginForm`, `RegisterForm`, `ForgotPasswordForm`, `ResetPasswordForm`, `VerifyEmailPanel`, `UserMenu`, `PasswordRequirements` |
 | `settings`      | `ProfileSettings`, `ChangePasswordForm`, `ActiveSessions`, `AppearanceSettings`, `ResetDisplayPreferences`                                                                                               |
@@ -171,24 +171,44 @@ transaction explorer receives _server-rendered_ rows as props, so formatting run
 
 ## 7. Routes
 
-| Route              | Content in Phase 2                                                                                             |
-| ------------------ | -------------------------------------------------------------------------------------------------------------- |
-| `/`                | Temporary (307) redirect to `/dashboard` (which sends signed-out visitors to `/login`).                        |
-| `/dashboard`       | Visual prototype: balance overview, money in/out/saved, recent transactions, budgets, spending by category.    |
-| `/transactions`    | Upcoming-feature state and a sample list with working search and type filters.                                 |
-| `/budgets`         | Upcoming-feature state and sample budget progress cards.                                                       |
-| `/accounts`        | Upcoming-feature state and sample account cards.                                                               |
-| `/insights`        | Upcoming-feature state and what to expect (no generated insights).                                             |
-| `/settings`        | Profile (name, currency, time zone), password change, signed-in devices, theme, preference reset, diagnostics. |
-| `/login`           | Sign in; notices after sign-out or an ended session; resend link for unconfirmed addresses.                    |
-| `/register`        | Create an account with live password guidance; ends on a "check your inbox" confirmation.                      |
-| `/forgot-password` | Request a reset link; the confirmation never reveals whether an account exists.                                |
-| `/reset-password`  | Choose a new password from an e-mailed link; handles incomplete, expired, and used links.                      |
-| `/verify-email`    | Consumes the confirmation link; offers a new link when it cannot be used.                                      |
-| unknown URLs       | Branded 404 (HTTP 404).                                                                                        |
+| Route              | Content in Phase 2                                                                                                                                                  |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/`                | Temporary (307) redirect to `/dashboard` (which sends signed-out visitors to `/login`).                                                                             |
+| `/dashboard`       | Visual prototype: balance overview, money in/out/saved, recent transactions, budgets, spending by category.                                                         |
+| `/transactions`    | Upcoming-feature state and a sample list with working search and type filters.                                                                                      |
+| `/budgets`         | Upcoming-feature state and sample budget progress cards.                                                                                                            |
+| `/accounts`        | **Live data.** Totals per currency (held vs. owed), accounts grouped by classification, active/archived filter, add/edit sheet, details sheet, archive and restore. |
+| `/insights`        | Upcoming-feature state and what to expect (no generated insights).                                                                                                  |
+| `/settings`        | Profile (name, currency, time zone), password change, signed-in devices, theme, preference reset, diagnostics.                                                      |
+| `/login`           | Sign in; notices after sign-out or an ended session; resend link for unconfirmed addresses.                                                                         |
+| `/register`        | Create an account with live password guidance; ends on a "check your inbox" confirmation.                                                                           |
+| `/forgot-password` | Request a reset link; the confirmation never reveals whether an account exists.                                                                                     |
+| `/reset-password`  | Choose a new password from an e-mailed link; handles incomplete, expired, and used links.                                                                           |
+| `/verify-email`    | Consumes the confirmation link; offers a new link when it cannot be used.                                                                                           |
+| unknown URLs       | Branded 404 (HTTP 404).                                                                                                                                             |
 
 All routes are statically prerendered. Every route in the `(app)` group requires a signed-in user;
 the `(auth)` pages are public, and `/login` and `/register` send signed-in users on to the app.
+
+## 7a. Accounts page (Phase 4)
+
+- **Live only.** Everything comes from `services/accounts.service.ts`; there is no fallback to
+  fixtures, and nothing is stored in the browser. Loading shows a skeleton, failures an
+  `ErrorState` with retry, and a new user a first-account `EmptyState`.
+- **Held vs. owed.** Cards show "Balance" (or "Overdrawn") for assets and "Amount owed" (or "In
+  credit") for credit cards, plus available credit when a limit exists. Totals show "Money held"
+  and "Amount owed" per currency and never add them up. All figures are calculated by the API.
+- **Adaptive form.** The type comes first and decides the rest: cash has no provider, cards ask
+  for the amount owed and an optional limit, bank accounts accept a minus sign for overdrafts.
+  Amounts are typed in major units in a `MoneyInput` and parsed exactly; extra decimal places are
+  reported, never rounded. Once an account has transactions, currency, opening balance, and date
+  are disabled with an explanation. Editing offers only types of the same classification.
+- **Interactions.** The form and details open in side sheets (full width on phones); archiving asks
+  for confirmation in the existing `ConfirmDialog` (a bottom sheet on phones), now also usable in
+  controlled mode from a menu. After any change the list refreshes in the background
+  (`useAsyncResource().refresh`) without flashing a skeleton, and a status message confirms it.
+- Account accents (`color`) map onto the chart tokens, so both themes keep their checked contrast.
+- The dashboard is unchanged and still shows labelled sample data.
 
 ## 8. Prototype data rules
 

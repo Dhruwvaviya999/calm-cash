@@ -1,7 +1,17 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import type { z } from 'zod';
 
-import type { AccountDto } from '../types/account';
+import type {
+  AccountBalanceDto,
+  AccountDto,
+  AccountListDto,
+  AccountListQuery,
+  AccountSummaryDto,
+  AccountWithBalanceDto,
+  CreateAccountInput,
+  CurrencyBalanceSummaryDto,
+  UpdateAccountInput,
+} from '../types/account';
 import type { ApiErrorResponse } from '../types/api';
 import type {
   AcceptedDto,
@@ -27,7 +37,17 @@ import type { CategoryDto } from '../types/category';
 import type { HealthCheckDto, ReadinessCheckDto } from '../types/health';
 import type { TransactionDto } from '../types/transaction';
 import type { UserDto } from '../types/user';
-import type { accountDtoSchema } from './account';
+import type {
+  accountBalanceDtoSchema,
+  accountDtoSchema,
+  accountListDtoSchema,
+  accountListQuerySchema,
+  accountSummaryDtoSchema,
+  accountWithBalanceDtoSchema,
+  createAccountInputSchema,
+  currencyBalanceSummaryDtoSchema,
+  updateAccountInputSchema,
+} from './account';
 import type { apiErrorResponseSchema } from './api';
 import type {
   acceptedDtoSchema,
@@ -89,5 +109,20 @@ describe('schema ⇄ interface contracts', () => {
     expectTypeOf<z.output<typeof sessionDtoSchema>>().toEqualTypeOf<SessionDto>();
     expectTypeOf<z.output<typeof sessionListDtoSchema>>().toEqualTypeOf<SessionListDto>();
     expectTypeOf<z.output<typeof revokedSessionsDtoSchema>>().toEqualTypeOf<RevokedSessionsDto>();
+  });
+
+  it('infers exactly the account request and response types', () => {
+    expectTypeOf<z.output<typeof createAccountInputSchema>>().toEqualTypeOf<CreateAccountInput>();
+    expectTypeOf<z.output<typeof updateAccountInputSchema>>().toEqualTypeOf<UpdateAccountInput>();
+    expectTypeOf<z.output<typeof accountListQuerySchema>>().toEqualTypeOf<AccountListQuery>();
+    expectTypeOf<z.output<typeof accountBalanceDtoSchema>>().toEqualTypeOf<AccountBalanceDto>();
+    expectTypeOf<
+      z.output<typeof accountWithBalanceDtoSchema>
+    >().toEqualTypeOf<AccountWithBalanceDto>();
+    expectTypeOf<z.output<typeof accountListDtoSchema>>().toEqualTypeOf<AccountListDto>();
+    expectTypeOf<
+      z.output<typeof currencyBalanceSummaryDtoSchema>
+    >().toEqualTypeOf<CurrencyBalanceSummaryDto>();
+    expectTypeOf<z.output<typeof accountSummaryDtoSchema>>().toEqualTypeOf<AccountSummaryDto>();
   });
 });
