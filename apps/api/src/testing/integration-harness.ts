@@ -19,6 +19,12 @@ import {
 } from '../modules/accounts/accounts.repository';
 import type { AuthRateLimits, RateLimitRule } from '../modules/auth/auth.rate-limits';
 import { createPrismaAuthRepository, type AuthRepository } from '../modules/auth/auth.repository';
+import { createPrismaCategoriesRepository } from '../modules/categories/categories.repository';
+import { createPrismaTagsRepository } from '../modules/tags/tags.repository';
+import {
+  createPrismaTransactionsRepository,
+  type TransactionsRepository,
+} from '../modules/transactions/transactions.repository';
 import { createArgon2PasswordHasher } from '../modules/auth/password-hasher';
 import { assertDisposableDatabaseUrl } from './disposable-database';
 import { FAST_ARGON2_PARAMETERS, TEST_ALLOWED_ORIGIN, TEST_APP_CONFIG } from './create-test-app';
@@ -72,6 +78,8 @@ export interface TestContextOptions {
   rateLimits?: Partial<AuthRateLimits>;
   /** Wraps the real accounts repository, e.g. to simulate database failures. */
   accountsRepository?: (real: AccountsRepository) => AccountsRepository;
+  /** Wraps the real transactions repository, e.g. to inject a failure in the middle of a write. */
+  transactionsRepository?: (real: TransactionsRepository) => TransactionsRepository;
 }
 
 /**
@@ -120,6 +128,14 @@ export function useIntegrationDatabase(): {
           ),
           now: clock.now,
         },
+        transactions: {
+          repository: (options.transactionsRepository ?? ((real) => real))(
+            createPrismaTransactionsRepository(prisma),
+          ),
+          now: clock.now,
+        },
+        categories: { repository: createPrismaCategoriesRepository(prisma), now: clock.now },
+        tags: { repository: createPrismaTagsRepository(prisma) },
       });
       return { app, prisma, repository, email, clock, tasks };
     },

@@ -151,13 +151,21 @@ pnpm test:integration                            # API against a real database (
 must name a database ending in `_test` and differ from `DATABASE_URL`; the suite refuses to run
 otherwise. The database is created and migrated automatically (`prisma migrate deploy`) on the same
 PostgreSQL server, and every table is truncated before each test — the development database is
-never touched. Run `pnpm db:up` first. Integration files run one at a time.
+never touched. Run `pnpm db:up` first. Integration files run one at a time; the transaction
+concurrency suite sends parallel requests that each use their own pooled connection, so they
+exercise PostgreSQL's row locks for real. Integration tests use an in-memory e-mail service and
+never send mail.
 
-| Package  | Suites                                                                                                                                                                                                                                                                                                                                 |
-| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `shared` | Minor-unit money helpers; schema validation rules; compile-time schema ⇄ interface equality. Auth input/response schemas and the password policy.                                                                                                                                                                                      |
-| `api`    | Health endpoints, error envelopes, CORS, origin check, rate limiting, security headers, request IDs, env validation, the validation convention, graceful shutdown, Prisma enum ⇄ shared literal parity, token/cookie/Argon2/user-agent helpers, e-mail templates. Integration: the complete authentication API.                        |
-| `web`    | API client (credentials, CSRF header and retry); safe return paths; money/date formatting; navigation rules; the theme bootstrap script; budget status; fixtures against shared schemas; static rendering of finance components; in jsdom: auth forms, route guards, auth provider, user menu, settings, mobile navigation, and theme. |
+**Running a second API by hand** (for example against the test database for a browser check):
+override `DATABASE_URL`, `API_PORT`, `CORS_ORIGINS`, and the `SMTP_*` variables (`SMTP_HOST=localhost`,
+`SMTP_PORT=1025`, empty `SMTP_USER`/`SMTP_PASSWORD`) explicitly, because it otherwise inherits the
+root `.env`, including any real mail server configured there.
+
+| Package  | Suites                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `shared` | Minor-unit money helpers; schema validation rules; compile-time schema ⇄ interface equality. Auth input/response schemas and the password policy. Transaction, reconciliation, bulk, and list-query schemas; tags; amount filters; time-zone conversion including daylight-saving gaps and overlaps.                                                                                                                                                         |
+| `api`    | Health endpoints, error envelopes, CORS, origin check, rate limiting, security headers, request IDs, env validation, the validation convention, graceful shutdown, Prisma enum ⇄ shared literal parity, token/cookie/Argon2/user-agent helpers, e-mail templates, balance arithmetic, transaction rules and filters, category ordering. Integration: authentication, accounts, transactions (incl. concurrency and failure injection), categories, and tags. |
+| `web`    | API client (credentials, CSRF header and retry); safe return paths; money/date formatting; navigation rules; the theme bootstrap script; budget status; fixtures against shared schemas; static rendering of finance components; transaction form and URL-filter models; in jsdom: auth forms, route guards, auth provider, user menu, settings, mobile navigation, theme, accounts, and the transactions page.                                              |
 
 Type-level assertions (`expectTypeOf`) are checked by `pnpm typecheck`, not by `pnpm test`.
 

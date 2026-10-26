@@ -1,13 +1,25 @@
-import type { CurrencyCode, MinorUnitsString, TransactionType } from '@calmcash/shared';
+import type {
+  CurrencyCode,
+  MinorUnitsString,
+  TransactionDto,
+  TransactionType,
+} from '@calmcash/shared';
 import type { ReactNode } from 'react';
 
 import { formatMoneyMagnitude, formatMoneyMagnitudeToParts, MINUS_SIGN } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
-/** How an amount affects the user: money in, money out, moved between accounts, or a balance. */
-export type AmountDirection = 'credit' | 'debit' | 'transfer' | 'balance';
+/**
+ * How an amount affects the user: money in, money out, moved between accounts, a balance
+ * correction up or down, or a balance.
+ */
+export type AmountDirection =
+  'credit' | 'debit' | 'transfer' | 'adjustment-up' | 'adjustment-down' | 'balance';
 
-export function directionForTransactionType(type: TransactionType): AmountDirection {
+/** Direction by type alone; balance adjustments need `directionForTransaction`. */
+export function directionForTransactionType(
+  type: Exclude<TransactionType, 'balance_adjustment'>,
+): AmountDirection {
   switch (type) {
     case 'income':
       return 'credit';
@@ -18,11 +30,22 @@ export function directionForTransactionType(type: TransactionType): AmountDirect
   }
 }
 
+export function directionForTransaction(transaction: TransactionDto): AmountDirection {
+  return transaction.type === 'balance_adjustment'
+    ? transaction.adjustmentDirection === 'increase'
+      ? 'adjustment-up'
+      : 'adjustment-down'
+    : directionForTransactionType(transaction.type);
+}
+
 const DIRECTION_STYLES: Readonly<Record<AmountDirection, { srLabel: string; className: string }>> =
   {
     credit: { srLabel: 'Credit', className: 'text-income' },
     debit: { srLabel: 'Debit', className: 'text-expense' },
     transfer: { srLabel: 'Transfer', className: 'text-transfer' },
+    // Corrections are neither income nor spending, so they stay neutral in colour.
+    'adjustment-up': { srLabel: 'Balance adjusted up by', className: 'text-foreground' },
+    'adjustment-down': { srLabel: 'Balance adjusted down by', className: 'text-foreground' },
     balance: { srLabel: '', className: 'text-foreground' },
   };
 
@@ -44,8 +67,8 @@ export interface FinancialAmountProps {
 }
 
 function signFor(direction: AmountDirection, negative: boolean): string {
-  if (direction === 'credit') return '+';
-  if (direction === 'debit') return MINUS_SIGN;
+  if (direction === 'credit' || direction === 'adjustment-up') return '+';
+  if (direction === 'debit' || direction === 'adjustment-down') return MINUS_SIGN;
   if (direction === 'balance' && negative) return MINUS_SIGN;
   return '';
 }

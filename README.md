@@ -3,12 +3,12 @@
 CalmCash is an AI-powered personal finance tracker. The roadmap covers transaction management,
 budgeting, bank statement imports, financial analytics, AI insights, and recurring payments.
 
-> **Status — Phase 4 (financial models and account management) complete.** On top of the
-> foundation, design system, and authentication of Phases 1–3, people can add, edit, archive, and
-> restore their cash, bank, savings, wallet, and credit-card accounts with exact opening balances,
-> and see what they hold and what they owe per currency. The Accounts page uses live data; the
-> dashboard, transactions, budgets, and insights still show clearly labelled sample data until
-> transactions arrive in Phase 5.
+> **Status — Phase 5 (transaction management) complete.** On top of the foundation, design
+> system, authentication, and accounts of Phases 1–4, people record income, expenses, transfers
+> between their accounts, and balance corrections — with who, why, category, payment method, date,
+> notes, and tags — then search, filter, edit, void, restore, and bulk-edit their history. Balances
+> stay exact and consistent under concurrent writes. Accounts and Transactions use live data; the
+> dashboard, budgets, and insights still show clearly labelled sample data until later phases.
 
 ## Tech stack
 
@@ -35,7 +35,7 @@ calmcash/
 │   │       ├── config/      Validated environment configuration
 │   │       ├── lib/         Database client, logger, errors, request IDs, shutdown
 │   │       ├── middleware/  Request logging, validation, 404, error handler
-│   │       ├── modules/     Feature modules (health, auth, accounts)
+│   │       ├── modules/     Feature modules (health, auth, accounts, transactions, categories, tags)
 │   │       └── routes/      Versioned routers (/api/v1)
 │   └── web/                 Next.js web app (TypeScript)
 │       └── src/
@@ -113,7 +113,7 @@ as **Connected**. The API health endpoints are
 - [Authentication and security](docs/authentication.md) — sessions, cookies, CSRF, passwords,
   e-mail tokens, rate limits, deployment model, configuration.
 - [Database design](docs/database-design.md) — model relationships, money representation, balance
-  rules, constraints, migrations.
+  rules, transactions, categories, tags, locking, constraints, migrations.
 - [Development guide](docs/development-guide.md) — setup, commands, testing, conventions,
   troubleshooting.
 

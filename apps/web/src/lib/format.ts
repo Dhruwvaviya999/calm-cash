@@ -100,35 +100,36 @@ export function percentOf(
   return Number((numerator * 200n + denominator) / (denominator * 2n));
 }
 
-const dateFormatters = {
-  dayMonth: new Intl.DateTimeFormat(DISPLAY_LOCALE, {
-    day: 'numeric',
-    month: 'short',
-    timeZone: DISPLAY_TIME_ZONE,
-  }),
-  fullDate: new Intl.DateTimeFormat(DISPLAY_LOCALE, {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-    timeZone: DISPLAY_TIME_ZONE,
-  }),
-  monthYear: new Intl.DateTimeFormat(DISPLAY_LOCALE, {
-    month: 'long',
-    year: 'numeric',
-    timeZone: DISPLAY_TIME_ZONE,
-  }),
-} as const;
+const DATE_STYLES = {
+  dayMonth: { day: 'numeric', month: 'short' },
+  dayMonthYear: { day: 'numeric', month: 'short', year: 'numeric' },
+  fullDate: { day: 'numeric', month: 'long', year: 'numeric' },
+  monthYear: { month: 'long', year: 'numeric' },
+} as const satisfies Readonly<Record<string, Intl.DateTimeFormatOptions>>;
 
-export type DateStyle = keyof typeof dateFormatters;
+export type DateStyle = keyof typeof DATE_STYLES;
+
+const dateFormatters = new Map<string, Intl.DateTimeFormat>();
 
 /**
  * Formats an ISO timestamp (`IsoDateTimeString`) or calendar date (`IsoDateString`, both strings)
- * in the display time zone, e.g. `"24 Oct"`.
+ * in a time zone (the user's preference when known), e.g. `"24 Oct"`.
  */
-export function formatDate(value: IsoDateTimeString, style: DateStyle = 'dayMonth'): string {
-  // Calendar dates are anchored at noon UTC so every time zone shows the same day.
-  const instant = value.length === 10 ? `${value}T12:00:00.000Z` : value;
-  return dateFormatters[style].format(new Date(instant));
+export function formatDate(
+  value: IsoDateTimeString,
+  style: DateStyle = 'dayMonth',
+  timeZone: string = DISPLAY_TIME_ZONE,
+): string {
+  // Calendar dates are shown as written, whatever the time zone.
+  const calendarDate = value.length === 10;
+  const zone = calendarDate ? 'UTC' : timeZone;
+  const key = `${style}|${zone}`;
+  let formatter = dateFormatters.get(key);
+  if (formatter === undefined) {
+    formatter = new Intl.DateTimeFormat(DISPLAY_LOCALE, { ...DATE_STYLES[style], timeZone: zone });
+    dateFormatters.set(key, formatter);
+  }
+  return formatter.format(new Date(calendarDate ? `${value}T12:00:00.000Z` : value));
 }
 
 const dateTimeFormatters = new Map<string, Intl.DateTimeFormat>();

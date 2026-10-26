@@ -36,7 +36,7 @@ describe('sample fixtures', () => {
       expect(item.account.id).toBe(item.transaction.accountId);
       if (item.transaction.type === 'transfer') {
         expect(item.transferAccount?.id).toBe(item.transaction.transferAccountId);
-      } else {
+      } else if (item.transaction.type !== 'balance_adjustment') {
         expect(item.category?.id).toBe(item.transaction.categoryId);
       }
     }

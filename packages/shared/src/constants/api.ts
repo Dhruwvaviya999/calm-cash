@@ -11,6 +11,13 @@ export const REQUEST_ID_HEADER = 'x-request-id';
  */
 export const CSRF_TOKEN_HEADER = 'x-csrf-token';
 
+/**
+ * Optional header on requests that record money (`POST /transactions`, reconciliations): a UUID
+ * chosen by the client for one logical operation. Repeating the request with the same key returns
+ * the transaction recorded the first time instead of recording it again.
+ */
+export const IDEMPOTENCY_KEY_HEADER = 'idempotency-key';
+
 /** Machine-readable error codes returned in `ApiErrorResponse.error.code`. */
 export const ERROR_CODES = [
   'BAD_REQUEST',

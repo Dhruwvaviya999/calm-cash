@@ -49,8 +49,34 @@ enum TransactionType {
   income
   expense
   transfer
+  /// Reconciliation: corrects one account's balance by `amount_minor` in `adjustment_direction`.
+  balance_adjustment
 
   @@map("transaction_type")
+}
+
+/// Which way a balance adjustment moves the account's signed net position.
+enum AdjustmentDirection {
+  increase
+  decrease
+
+  @@map("adjustment_direction")
+}
+
+/// How a payment was made (optional; never on balance adjustments).
+enum PaymentMethod {
+  cash
+  upi
+  bank_transfer
+  debit_card
+  credit_card
+  net_banking
+  cheque
+  digital_wallet
+  direct_debit
+  other
+
+  @@map("payment_method")
 }
 
 enum CategoryKind {
@@ -184,40 +210,63 @@ model Account {
 }
 
 model Category {
-  id        String       @id @default(uuid(7)) @db.Uuid
-  userId    String       @map("user_id") @db.Uuid
-  name      String       @db.VarChar(50)
-  kind      CategoryKind
-  createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id         String       @id @default(uuid(7)) @db.Uuid
+  userId     String       @map("user_id") @db.Uuid
+  /// Unique per user and kind across the whole tree, so a name always identifies one category.
+  name       String       @db.VarChar(50)
+  kind       CategoryKind
+  /// Top-level category of a subcategory (one level deep, same user and kind; API-enforced).
+  parentId   String?      @map("parent_id") @db.Uuid
+  /// Set while archived: kept on past transactions and budgets, not offered for new ones.
+  archivedAt DateTime?    @map("archived_at") @db.Timestamptz(3)
+  createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // NO ACTION: a top-level category with subcategories cannot be deleted from under them.
+  parent       Category?     @relation("CategoryTree", fields: [parentId], references: [id], onDelete: NoAction)
+  children     Category[]    @relation("CategoryTree")
   transactions Transaction[]
   budgets      Budget[]
 
   @@unique([userId, kind, name])
+  @@index([parentId])
   @@map("categories")
 }
 
 model Transaction {
-  id                String          @id @default(uuid(7)) @db.Uuid
-  userId            String          @map("user_id") @db.Uuid
+  id                  String               @id @default(uuid(7)) @db.Uuid
+  userId              String               @map("user_id") @db.Uuid
   /// Source account. For transfers, money leaves this account.
-  accountId         String          @map("account_id") @db.Uuid
-  type              TransactionType
-  /// Always positive, in minor units of `currency`; the direction is defined by `type`.
-  amountMinor       BigInt          @map("amount_minor")
-  currency          String          @db.Char(3)
-  description       String          @db.VarChar(255)
-  merchant          String?         @db.VarChar(120)
-  /// Must be null for transfers (enforced by a CHECK constraint).
-  categoryId        String?         @map("category_id") @db.Uuid
+  accountId           String               @map("account_id") @db.Uuid
+  type                TransactionType
+  /// Always positive, in minor units of `currency`; the direction is defined by `type` (and, for
+  /// balance adjustments, by `adjustmentDirection`).
+  amountMinor         BigInt               @map("amount_minor")
+  currency            String               @db.Char(3)
+  /// What the money was for; for balance adjustments, the reason for the correction.
+  description         String               @db.VarChar(255)
+  /// Counterparty: merchant or recipient of an expense, payer of income.
+  merchant            String?              @db.VarChar(120)
+  /// Must be null for transfers and balance adjustments (CHECK constraints).
+  categoryId          String?              @map("category_id") @db.Uuid
   /// Destination account. Required for transfers and null otherwise (CHECK constraint).
-  transferAccountId String?         @map("transfer_account_id") @db.Uuid
-  notes             String?         @db.VarChar(2000)
-  occurredAt        DateTime        @map("occurred_at") @db.Timestamptz(3)
-  createdAt         DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt         DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+  transferAccountId   String?              @map("transfer_account_id") @db.Uuid
+  /// Required for balance adjustments and null otherwise (CHECK constraint).
+  adjustmentDirection AdjustmentDirection? @map("adjustment_direction")
+  paymentMethod       PaymentMethod?       @map("payment_method")
+  notes               String?              @db.VarChar(2000)
+  /// Normalised labels (lower case, hyphenated), at most 10 (CHECK constraint).
+  tags                String[]             @default([]) @db.VarChar(32)
+  /// Client-chosen key of the request that created the row; a retry with the same key returns
+  /// this row instead of recording the money twice.
+  idempotencyKey      String?              @map("idempotency_key") @db.Uuid
+  /// Set while voided: the row is kept for the record but counts toward nothing.
+  voidedAt            DateTime?            @map("voided_at") @db.Timestamptz(3)
+  voidReason          String?              @map("void_reason") @db.VarChar(500)
+  occurredAt          DateTime             @map("occurred_at") @db.Timestamptz(3)
+  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   // NO ACTION: an account with history cannot be deleted directly (archive it instead), while
@@ -226,10 +275,12 @@ model Transaction {
   transferAccount Account?  @relation("TransactionTransferAccount", fields: [transferAccountId], references: [id], onDelete: NoAction)
   category        Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
 
+  @@unique([userId, idempotencyKey])
   @@index([userId, occurredAt(sort: Desc)])
   @@index([accountId, occurredAt(sort: Desc)])
   @@index([transferAccountId])
   @@index([categoryId])
+  @@index([tags], type: Gin)
   @@map("transactions")
 }
 

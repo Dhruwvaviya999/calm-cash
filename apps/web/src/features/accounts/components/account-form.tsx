@@ -414,7 +414,7 @@ export function AccountForm({
       {editing !== undefined && locked && (
         <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <Lock aria-hidden="true" className="size-3.5" />
-          Balance corrections will be possible with an adjustment once transactions can be recorded.
+          To match your bank or statement, use Correct balance in the account’s details.
         </p>
       )}
     </form>

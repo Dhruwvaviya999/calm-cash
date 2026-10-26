@@ -33,9 +33,30 @@ import type {
   VerifyEmailInput,
 } from '../types/auth';
 import type { BudgetDto } from '../types/budget';
-import type { CategoryDto } from '../types/category';
+import type {
+  CategoryDto,
+  CategoryListDto,
+  CreateCategoryInput,
+  UpdateCategoryInput,
+} from '../types/category';
 import type { HealthCheckDto, ReadinessCheckDto } from '../types/health';
-import type { TransactionDto } from '../types/transaction';
+import type {
+  BulkTransactionInput,
+  BulkTransactionResultDto,
+  CreateReconciliationInput,
+  CreateTransactionInput,
+  ReconciliationPreviewDto,
+  ReconciliationPreviewInput,
+  TagListDto,
+  TransactionDto,
+  TransactionFilterQuery,
+  TransactionListItemDto,
+  TransactionListQuery,
+  TransactionPageDto,
+  TransactionSummaryDto,
+  UpdateTransactionInput,
+  VoidTransactionInput,
+} from '../types/transaction';
 import type { UserDto } from '../types/user';
 import type {
   accountBalanceDtoSchema,
@@ -69,9 +90,30 @@ import type {
   verifyEmailInputSchema,
 } from './auth';
 import type { budgetDtoSchema } from './budget';
-import type { categoryDtoSchema } from './category';
+import type {
+  categoryDtoSchema,
+  categoryListDtoSchema,
+  createCategoryInputSchema,
+  updateCategoryInputSchema,
+} from './category';
 import type { healthCheckDtoSchema, readinessCheckDtoSchema } from './health';
-import type { transactionDtoSchema } from './transaction';
+import type {
+  bulkTransactionInputSchema,
+  bulkTransactionResultDtoSchema,
+  createReconciliationInputSchema,
+  createTransactionInputSchema,
+  reconciliationPreviewDtoSchema,
+  reconciliationPreviewInputSchema,
+  tagListDtoSchema,
+  transactionDtoSchema,
+  transactionFilterQuerySchema,
+  transactionListItemDtoSchema,
+  transactionListQuerySchema,
+  transactionPageDtoSchema,
+  transactionSummaryDtoSchema,
+  updateTransactionInputSchema,
+  voidTransactionInputSchema,
+} from './transaction';
 import type { userDtoSchema } from './user';
 
 // These assertions are verified by `tsc` (pnpm typecheck). They fail the build if a Zod schema
@@ -124,5 +166,53 @@ describe('schema ⇄ interface contracts', () => {
       z.output<typeof currencyBalanceSummaryDtoSchema>
     >().toEqualTypeOf<CurrencyBalanceSummaryDto>();
     expectTypeOf<z.output<typeof accountSummaryDtoSchema>>().toEqualTypeOf<AccountSummaryDto>();
+  });
+
+  it('infers exactly the transaction request and response types', () => {
+    expectTypeOf<
+      z.output<typeof createTransactionInputSchema>
+    >().toEqualTypeOf<CreateTransactionInput>();
+    expectTypeOf<
+      z.output<typeof updateTransactionInputSchema>
+    >().toEqualTypeOf<UpdateTransactionInput>();
+    expectTypeOf<
+      z.output<typeof voidTransactionInputSchema>
+    >().toEqualTypeOf<VoidTransactionInput>();
+    expectTypeOf<
+      z.output<typeof reconciliationPreviewInputSchema>
+    >().toEqualTypeOf<ReconciliationPreviewInput>();
+    expectTypeOf<
+      z.output<typeof createReconciliationInputSchema>
+    >().toEqualTypeOf<CreateReconciliationInput>();
+    expectTypeOf<
+      z.output<typeof bulkTransactionInputSchema>
+    >().toEqualTypeOf<BulkTransactionInput>();
+    expectTypeOf<
+      z.output<typeof transactionFilterQuerySchema>
+    >().toEqualTypeOf<TransactionFilterQuery>();
+    expectTypeOf<
+      z.output<typeof transactionListQuerySchema>
+    >().toEqualTypeOf<TransactionListQuery>();
+
+    expectTypeOf<
+      z.output<typeof transactionListItemDtoSchema>
+    >().toEqualTypeOf<TransactionListItemDto>();
+    expectTypeOf<z.output<typeof transactionPageDtoSchema>>().toEqualTypeOf<TransactionPageDto>();
+    expectTypeOf<
+      z.output<typeof transactionSummaryDtoSchema>
+    >().toEqualTypeOf<TransactionSummaryDto>();
+    expectTypeOf<z.output<typeof tagListDtoSchema>>().toEqualTypeOf<TagListDto>();
+    expectTypeOf<
+      z.output<typeof reconciliationPreviewDtoSchema>
+    >().toEqualTypeOf<ReconciliationPreviewDto>();
+    expectTypeOf<
+      z.output<typeof bulkTransactionResultDtoSchema>
+    >().toEqualTypeOf<BulkTransactionResultDto>();
+  });
+
+  it('infers exactly the category request and response types', () => {
+    expectTypeOf<z.output<typeof createCategoryInputSchema>>().toEqualTypeOf<CreateCategoryInput>();
+    expectTypeOf<z.output<typeof updateCategoryInputSchema>>().toEqualTypeOf<UpdateCategoryInput>();
+    expectTypeOf<z.output<typeof categoryListDtoSchema>>().toEqualTypeOf<CategoryListDto>();
   });
 });

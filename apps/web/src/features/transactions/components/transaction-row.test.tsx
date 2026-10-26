@@ -34,6 +34,7 @@ const groceries: CategoryDto = {
   id: '0193a000-0000-7000-8000-000000000101',
   name: 'Groceries',
   kind: 'expense',
+  status: 'active',
   ...audit,
 };
 
@@ -51,6 +52,8 @@ describe('TransactionRow', () => {
       amountMinor: '245000',
       currency: 'INR',
       occurredAt: '2026-10-23T12:45:00.000Z',
+      tags: [],
+      status: 'active',
       ...audit,
     };
     const markup = renderToStaticMarkup(
@@ -81,6 +84,8 @@ describe('TransactionRow', () => {
       amountMinor: '1250000',
       currency: 'INR',
       occurredAt: '2026-10-18T05:00:00.000Z',
+      tags: [],
+      status: 'active',
       ...audit,
     };
     const visible = text(
@@ -92,5 +97,34 @@ describe('TransactionRow', () => {
     expect(visible).toContain('To Rewards Card');
     expect(visible).toContain('Transfer');
     expect(visible).toContain('Everyday Savings');
+  });
+
+  it('describes balance adjustments without calling them income or spending', () => {
+    const transaction: TransactionDto = {
+      id: '0193a000-0000-7000-8000-000000000309',
+      type: 'balance_adjustment',
+      adjustmentDirection: 'decrease',
+      accountId: savings.id,
+      description: 'Matched to bank statement',
+      amountMinor: '4950',
+      currency: 'INR',
+      occurredAt: '2026-10-18T05:00:00.000Z',
+      tags: [],
+      status: 'voided',
+      voidedAt: '2026-10-19T05:00:00.000Z',
+      ...audit,
+    };
+    const markup = renderToStaticMarkup(
+      <TransactionRow item={{ transaction, account: savings }} timeZone="America/Los_Angeles" />,
+    );
+    const visible = text(markup);
+
+    expect(visible).toContain('Balance adjustment');
+    expect(visible).toContain('Matched to bank statement');
+    expect(visible).toContain('Voided');
+    // 05:00 UTC on 18 Oct is still 17 Oct in Los Angeles.
+    expect(visible).toContain('17 Oct');
+    expect(markup).toContain('Balance adjusted down by');
+    expect(markup).not.toContain('Debit');
   });
 });

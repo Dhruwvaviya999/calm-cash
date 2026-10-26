@@ -4,13 +4,14 @@ import {
   entityIdSchema,
   updateAccountInputSchema,
 } from '@calmcash/shared';
-import { Router, type RequestHandler } from 'express';
+import { Router } from 'express';
 import { z } from 'zod';
 
+import type { AuthBoundary } from '../../lib/auth-boundary';
 import { validateRequest } from '../../middleware/validate-request';
 import { createAccountsController } from './accounts.controller';
 import type { AccountsRepository } from './accounts.repository';
-import { createAccountsService, type Caller } from './accounts.service';
+import { createAccountsService } from './accounts.service';
 
 export interface AccountsModuleDependencies {
   repository: AccountsRepository;
@@ -19,11 +20,7 @@ export interface AccountsModuleDependencies {
 }
 
 /** Supplied by the authentication module through the composition root. */
-export interface AccountsAuthBoundary {
-  requireSession: RequestHandler;
-  requireCsrf: RequestHandler;
-  getCaller: (req: object) => Caller;
-}
+export type AccountsAuthBoundary = AuthBoundary;
 
 const accountParams = z.object({ accountId: entityIdSchema });
 

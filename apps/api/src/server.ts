@@ -9,6 +9,9 @@ import { createLogger } from './lib/logger';
 import { registerGracefulShutdown } from './lib/shutdown';
 import { createPrismaAccountsRepository } from './modules/accounts/accounts.repository';
 import { createPrismaAuthRepository } from './modules/auth/auth.repository';
+import { createPrismaCategoriesRepository } from './modules/categories/categories.repository';
+import { createPrismaTagsRepository } from './modules/tags/tags.repository';
+import { createPrismaTransactionsRepository } from './modules/transactions/transactions.repository';
 import { createArgon2PasswordHasher } from './modules/auth/password-hasher';
 import { scheduleSessionCleanup } from './modules/auth/session-cleanup';
 
@@ -47,6 +50,9 @@ const app = createApp({
     backgroundTasks,
   },
   accounts: { repository: createPrismaAccountsRepository(prisma) },
+  transactions: { repository: createPrismaTransactionsRepository(prisma) },
+  categories: { repository: createPrismaCategoriesRepository(prisma) },
+  tags: { repository: createPrismaTagsRepository(prisma) },
 });
 
 const stopSessionCleanup = scheduleSessionCleanup({

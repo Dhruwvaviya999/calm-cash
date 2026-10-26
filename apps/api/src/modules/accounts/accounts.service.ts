@@ -4,6 +4,7 @@ import {
   currencyCodeSchema,
   getAccountClassification,
   parseMinorUnits,
+  requiresNonNegativeBalance,
   serializeMinorUnits,
   type AccountListDto,
   type AccountListQuery,
@@ -15,16 +16,17 @@ import {
 } from '@calmcash/shared';
 
 import { AppError } from '../../lib/app-error';
+import type { Caller } from '../../lib/auth-boundary';
 import { describeAccountBalance, NO_MOVEMENTS, summarizeBalances } from './account-balance';
 import { fromIsoDate, toAccountDto, toIsoDate } from './accounts.mapper';
-import type { AccountChanges, AccountRecord, AccountsRepository } from './accounts.repository';
+import type {
+  AccountChanges,
+  AccountRecord,
+  AccountsRepository,
+  LockedAccountState,
+} from './accounts.repository';
 
-/** Who is calling; provided by the authentication module, never by the request body. */
-export interface Caller {
-  userId: string;
-  /** IANA time zone of the user, for "today" and opening-balance dates. */
-  timeZone: string;
-}
+export type { Caller } from '../../lib/auth-boundary';
 
 export interface AccountsService {
   list: (caller: Caller, query: AccountListQuery) => Promise<AccountListDto>;
@@ -87,12 +89,14 @@ function assertRules(state: Parameters<typeof accountRuleViolations>[0]): void {
  * - the type may change only within its classification (money held vs. money owed);
  * - once a transaction uses the account, the opening balance, its date, and the currency are
  *   locked, because changing them would silently rewrite the meaning of recorded history;
+ * - an account whose current balance is below zero cannot become a type that must never be
+ *   negative (cash, savings, wallet);
  * - a currency change must restate amounts in the new currency;
  * - type-specific rules are checked on the merged result.
  */
 export function planAccountUpdate(
   current: AccountRecord,
-  hasTransactions: boolean,
+  { hasTransactions, currentBalanceMinor }: LockedAccountState,
   input: UpdateAccountInput,
   caller: Caller,
   now: Date,
@@ -166,6 +170,16 @@ export function planAccountUpdate(
     openingBalanceMinor: serializeMinorUnits(openingBalanceMinor),
     creditLimitMinor: creditLimitMinor === null ? null : serializeMinorUnits(creditLimitMinor),
   });
+  // The rule above checks the opening balance; transactions may have moved the balance since.
+  if (type !== current.type && requiresNonNegativeBalance(type) && currentBalanceMinor < 0n) {
+    throw invalid([
+      {
+        path: 'body.type',
+        message:
+          'This account’s balance is below zero, and this type of account cannot be negative.',
+      },
+    ]);
+  }
 
   return {
     ...(input.name === undefined ? {} : { name: input.name }),
@@ -263,8 +277,8 @@ export function createAccountsService({
 
     update: async (caller, accountId, input) => {
       const at = now();
-      const updated = await repository.update(caller.userId, accountId, (current, used) =>
-        planAccountUpdate(current, used, input, caller, at),
+      const updated = await repository.update(caller.userId, accountId, (current, state) =>
+        planAccountUpdate(current, state, input, caller, at),
       );
       return single(caller, updated);
     },

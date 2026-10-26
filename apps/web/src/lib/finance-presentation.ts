@@ -2,7 +2,8 @@ import type {
   AccountClassification,
   AccountColor,
   AccountType,
-  CategoryDto,
+  AdjustmentDirection,
+  PaymentMethod,
   TransactionType,
 } from '@calmcash/shared';
 import {
@@ -11,15 +12,20 @@ import {
   Car,
   Clapperboard,
   CreditCard,
+  GraduationCap,
   HandCoins,
   HeartPulse,
   House,
   Landmark,
   Laptop,
   Percent,
+  Plane,
+  Repeat,
+  RotateCcw,
   ShoppingBag,
   ShoppingBasket,
   Smartphone,
+  Store,
   Tag,
   TrendingUp,
   UtensilsCrossed,
@@ -102,11 +108,53 @@ export const ACCOUNT_COLOR_PRESENTATION: Readonly<Record<AccountColor, AccountCo
     },
   };
 
+/** Short labels for list rows (bank-statement wording). */
 export const TRANSACTION_TYPE_LABELS: Readonly<Record<TransactionType, string>> = {
   income: 'Credit',
   expense: 'Debit',
   transfer: 'Transfer',
+  balance_adjustment: 'Balance adjustment',
 };
+
+export interface TransactionTypePresentation {
+  /** What the type selector and filters call it. */
+  label: string;
+  /** One line under the label in the type selector. */
+  description: string;
+}
+
+export const TRANSACTION_TYPE_PRESENTATION: Readonly<
+  Record<TransactionType, TransactionTypePresentation>
+> = {
+  expense: { label: 'Expense', description: 'Money you spent' },
+  income: { label: 'Income', description: 'Money you received' },
+  transfer: { label: 'Transfer', description: 'Between your own accounts' },
+  balance_adjustment: { label: 'Adjust balance', description: 'Match what your bank shows' },
+};
+
+export const PAYMENT_METHOD_LABELS: Readonly<Record<PaymentMethod, string>> = {
+  cash: 'Cash',
+  upi: 'UPI',
+  bank_transfer: 'Bank transfer',
+  debit_card: 'Debit card',
+  credit_card: 'Credit card',
+  net_banking: 'Net banking',
+  cheque: 'Cheque',
+  digital_wallet: 'Digital wallet',
+  direct_debit: 'Direct debit',
+  other: 'Other',
+};
+
+/** How an adjustment reads for money held vs. money owed (a card's balance going up means less owed). */
+export function describeAdjustmentDirection(
+  direction: AdjustmentDirection,
+  classification: AccountClassification,
+): string {
+  if (classification === 'liability') {
+    return direction === 'increase' ? 'Amount owed goes down' : 'Amount owed goes up';
+  }
+  return direction === 'increase' ? 'Balance goes up' : 'Balance goes down';
+}
 
 /** Chart-palette slot used to tint a category's icon tile. */
 export type CategoryTone = 'chart-1' | 'chart-2' | 'chart-3' | 'chart-4' | 'chart-5';
@@ -124,28 +172,42 @@ interface CategoryRule extends CategoryVisual {
 const CATEGORY_RULES: readonly CategoryRule[] = [
   { keywords: ['grocer', 'supermarket'], icon: ShoppingBasket, tone: 'chart-1' },
   { keywords: ['dining', 'food', 'restaurant', 'cafe'], icon: UtensilsCrossed, tone: 'chart-5' },
-  { keywords: ['transport', 'fuel', 'travel', 'commute'], icon: Car, tone: 'chart-2' },
+  { keywords: ['flight', 'hotel', 'travel', 'trip'], icon: Plane, tone: 'chart-2' },
+  { keywords: ['transport', 'fuel', 'commute', 'taxi'], icon: Car, tone: 'chart-2' },
   { keywords: ['bill', 'utilit', 'electric', 'internet'], icon: Zap, tone: 'chart-3' },
   { keywords: ['rent', 'home', 'housing'], icon: House, tone: 'chart-4' },
   { keywords: ['shopping', 'clothing'], icon: ShoppingBag, tone: 'chart-4' },
-  { keywords: ['health', 'medical', 'pharmacy'], icon: HeartPulse, tone: 'chart-5' },
-  { keywords: ['entertain', 'movie', 'stream'], icon: Clapperboard, tone: 'chart-2' },
+  { keywords: ['health', 'medical', 'pharmacy', 'medicine'], icon: HeartPulse, tone: 'chart-5' },
+  { keywords: ['subscription', 'streaming', 'software'], icon: Repeat, tone: 'chart-3' },
+  { keywords: ['entertain', 'movie', 'hobb'], icon: Clapperboard, tone: 'chart-2' },
+  { keywords: ['education', 'course', 'book'], icon: GraduationCap, tone: 'chart-1' },
   { keywords: ['salary', 'payroll', 'wage'], icon: Briefcase, tone: 'chart-1' },
   { keywords: ['freelance', 'consult'], icon: Laptop, tone: 'chart-2' },
+  { keywords: ['business'], icon: Store, tone: 'chart-4' },
   { keywords: ['interest', 'dividend'], icon: Percent, tone: 'chart-3' },
+  { keywords: ['refund', 'cashback'], icon: RotateCcw, tone: 'chart-1' },
 ];
 
 const FALLBACK_CATEGORY_VISUAL: CategoryVisual = { icon: Tag, tone: 'chart-2' };
 
-export function getCategoryVisual(category: Pick<CategoryDto, 'name'> | undefined): CategoryVisual {
+/** Matches the category's name, then its parent's (a subcategory looks like its family). */
+export function getCategoryVisual(
+  category: { name: string; parentName?: string | undefined } | undefined,
+): CategoryVisual {
   if (category === undefined) {
     return FALLBACK_CATEGORY_VISUAL;
   }
-  const name = category.name.toLowerCase();
-  const rule = CATEGORY_RULES.find((entry) =>
-    entry.keywords.some((keyword) => name.includes(keyword)),
-  );
-  return rule ?? FALLBACK_CATEGORY_VISUAL;
+  for (const candidate of [category.name, category.parentName]) {
+    const name = candidate?.toLowerCase();
+    const rule =
+      name === undefined
+        ? undefined
+        : CATEGORY_RULES.find((entry) => entry.keywords.some((keyword) => name.includes(keyword)));
+    if (rule !== undefined) {
+      return rule;
+    }
+  }
+  return FALLBACK_CATEGORY_VISUAL;
 }
 
 /** Static class names per tone, so Tailwind can detect every utility at build time. */

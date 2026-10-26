@@ -1,13 +1,13 @@
-import type { CategoryDto, TransactionType } from '@calmcash/shared';
-import { ArrowLeftRight } from 'lucide-react';
+import type { TransactionType } from '@calmcash/shared';
+import { ArrowLeftRight, Scale } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { CATEGORY_TONE_CLASSES, getCategoryVisual } from '@/lib/finance-presentation';
 import { cn } from '@/lib/utils';
 
 export interface CategoryIconProps {
-  category?: CategoryDto | undefined;
-  /** Transfers have no category and get their own neutral symbol. */
+  category?: { name: string; parentName?: string | undefined } | undefined;
+  /** Transfers and balance adjustments have no category and get their own neutral symbols. */
   transactionType?: TransactionType;
   size?: 'sm' | 'md';
   className?: string;
@@ -25,17 +25,19 @@ export function CategoryIcon({
   size = 'md',
   className,
 }: CategoryIconProps): ReactNode {
-  if (transactionType === 'transfer') {
+  if (transactionType === 'transfer' || transactionType === 'balance_adjustment') {
+    const transfer = transactionType === 'transfer';
     return (
       <span
         aria-hidden="true"
         className={cn(
-          'grid shrink-0 place-items-center bg-transfer/10 text-transfer',
+          'grid shrink-0 place-items-center',
+          transfer ? 'bg-transfer/10 text-transfer' : 'bg-muted text-muted-foreground',
           SIZE_CLASSES[size],
           className,
         )}
       >
-        <ArrowLeftRight />
+        {transfer ? <ArrowLeftRight /> : <Scale />}
       </span>
     );
   }

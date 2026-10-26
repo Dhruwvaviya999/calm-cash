@@ -342,4 +342,25 @@ describe('AccountsOverview', () => {
     expect(within(sheet).getByText(/Transactions will appear here/)).toBeDefined();
     expect(within(sheet).getByRole('button', { name: 'Edit account' })).toBeDefined();
   });
+
+  it('links an account to its transactions and to a balance correction', async () => {
+    respondWith([
+      { ...bank, hasTransactions: true, balance: { ...bank.balance, countedTransactions: 3 } },
+    ]);
+    renderWithAuth(<AccountsOverview />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole('button', { name: 'HDFC Salary' }));
+    const sheet = await screen.findByRole('dialog', { name: 'HDFC Salary' });
+
+    expect(
+      within(sheet).getByText('3 recorded transactions are included in this balance.'),
+    ).toBeDefined();
+    expect(
+      within(sheet).getByRole('link', { name: 'View transactions' }).getAttribute('href'),
+    ).toBe(`/transactions?accountId=${bank.account.id}`);
+    expect(within(sheet).getByRole('link', { name: 'Correct balance' }).getAttribute('href')).toBe(
+      `/transactions?reconcile=${bank.account.id}`,
+    );
+  });
 });

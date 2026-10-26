@@ -1,7 +1,8 @@
 'use client';
 
 import { parseMinorUnits, type AccountWithBalanceDto } from '@calmcash/shared';
-import { ArchiveRestore, Archive, ArrowLeftRight, Pencil } from 'lucide-react';
+import { ArchiveRestore, Archive, ArrowLeftRight, Pencil, Scale } from 'lucide-react';
+import Link from 'next/link';
 import type { ReactNode } from 'react';
 
 import { StatusBadge } from '@/components/feedback/status-badge';
@@ -41,7 +42,7 @@ function Row({ label, children }: { label: string; children: ReactNode }): React
   );
 }
 
-/** Everything known about one account. There is no transaction history yet, so none is shown. */
+/** Everything known about one account, with links to its transactions and balance correction. */
 export function AccountDetailsSheet({
   entry,
   timeZone,
@@ -140,9 +141,25 @@ function Details({
             <ArrowLeftRight aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
             <p>
               {balance.countedTransactions === 0
-                ? 'Transactions will appear here once you can record them in CalmCash. Until then the balance equals the opening balance.'
-                : `${balance.countedTransactions} recorded transactions are included in this balance.`}
+                ? 'Transactions will appear here once you record them. Until then the balance equals the opening balance.'
+                : `${String(balance.countedTransactions)} recorded ${balance.countedTransactions === 1 ? 'transaction is' : 'transactions are'} included in this balance.`}
             </p>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button asChild variant="outline" className="h-11 sm:h-9">
+              <Link href={`/transactions?accountId=${account.id}`}>
+                <ArrowLeftRight aria-hidden="true" />
+                View transactions
+              </Link>
+            </Button>
+            {account.status === 'active' && (
+              <Button asChild variant="outline" className="h-11 sm:h-9">
+                <Link href={`/transactions?reconcile=${account.id}`}>
+                  <Scale aria-hidden="true" />
+                  Correct balance
+                </Link>
+              </Button>
+            )}
           </div>
         </section>
 

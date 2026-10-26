@@ -2,8 +2,8 @@
 
 This document describes how the CalmCash codebase is organised, how its parts communicate, and the
 rules that keep features decoupled as the product grows. It reflects the Phase 1 foundation, the
-Phase 3 authentication layer (detailed in [authentication.md](./authentication.md)), and the
-Phase 4 accounts module.
+Phase 3 authentication layer (detailed in [authentication.md](./authentication.md)), the Phase 4
+accounts module, and the Phase 5 transactions, categories, and tags modules.
 
 ## 1. Overview
 
@@ -41,9 +41,10 @@ apps/
     app.ts                 Express app factory (no network binding — testable in-process)
     server.ts              Process entry: env validation, dependency wiring, listen, shutdown
     config/env.ts          Typed, validated runtime configuration
-    lib/                   Cross-cutting infrastructure (errors, logging, DB client, e-mail, background tasks, shutdown, …)
+    lib/                   Cross-cutting infrastructure (errors, logging, DB client, e-mail, auth boundary, …)
     middleware/            Request logging, origin check, validation convention, 404, error handler
-    modules/<feature>/     Feature modules (routes → controller → service → repository): health, auth, accounts
+    modules/<feature>/     Feature modules (routes → controller → service → repository): health, auth,
+                           accounts, transactions, categories, tags
     testing/               Test app factories, in-memory e-mail, integration-database harness
     routes/v1.ts           Composition root of API v1: mounts every module router
     generated/prisma/      Generated Prisma Client (git-ignored; `pnpm db:generate`)
@@ -119,7 +120,8 @@ Always import from the package root (`import { … } from '@calmcash/shared'`); 
   Caller-initiated aborts are re-thrown unchanged.
 - **CORS and sessions:** the API accepts browser requests only from `CORS_ORIGINS`, with credentials.
   The client sends `credentials: 'include'`, so the browser attaches the HttpOnly session cookie, and
-  adds the in-memory CSRF token as `x-csrf-token` on state-changing requests. A `401 UNAUTHORIZED`
+  adds the in-memory CSRF token as `x-csrf-token` on state-changing requests. Requests that record
+  money may also carry an `Idempotency-Key` header (allowed by CORS). A `401 UNAUTHORIZED`
   ends the client-side session; a `403 CSRF_TOKEN_INVALID` refreshes the token and retries once. See
   [authentication.md](./authentication.md).
 - **Request IDs:** the API assigns (or accepts a well-formed) `x-request-id`, returns it as a
@@ -286,7 +288,9 @@ Example: an `accounts` feature.
 Rules that keep modules independent:
 
 - A module never imports another module's internals. If `budgets` needs account data, it receives
-  an `AccountService`-shaped dependency through the composition root.
+  an `AccountService`-shaped dependency through the composition root. A module that other modules
+  must build on publishes an explicit `index.ts` (the accounts module exports the balance arithmetic
+  and the ledger query/lock there, and transactions import only that).
 - Routes in `apps/web/src/app` stay thin: they compose features, they do not contain business logic.
 - Features import from `components`, `hooks`, `lib`, `services`, and `types`; they never import
   from other features' internals — only from a feature's `index.ts` when sharing is intended.
@@ -327,11 +331,11 @@ Rules that keep modules independent:
 - **Authentication (Phase 3, done):** see [authentication.md](./authentication.md).
 - **Accounts (Phase 4, done):** see [§13](#13-accounts-module-phase-4) and the balance rules in
   [database-design.md](./database-design.md#3a-accounts-and-balance-semantics-phase-4).
-- **Transactions (Phase 5):** the transactions module must reuse `account-balance.ts` and
-  `movementTotals` (never a second balance formula), verify that every referenced account belongs
-  to the caller, is active, and has the same currency, lock the account row(s) with
-  `SELECT … FOR UPDATE` in the same database transaction (the opening-balance lock relies on it),
-  and add balance-adjustment transactions for corrections once history exists.
+- **Transactions (Phase 5, done):** see [§14](#14-transactions-categories-and-tags-phase-5) and
+  [database-design.md §3b](./database-design.md#3b-transactions-categories-and-tags-phase-5).
+- **Later phases** build on the same ledger: budgets and analytics read cash-flow totals (which
+  exclude transfers, adjustments, and voided rows), and statement imports will add a source and a
+  deduplication fingerprint per row (see the database design).
 
 ## 13. Accounts module (Phase 4)
 
@@ -362,3 +366,52 @@ from the request: every query is scoped by `getCaller(req).userId`.
   aggregate SQL for balances, row-locked updates) · `accounts.service.ts` (rules, edit policy) ·
   `accounts.mapper.ts` (row → DTO) · `accounts.controller.ts` · `accounts.routes.ts`.
 - Logs contain only the method, URL, status, and request ID — never balances or account details.
+
+## 14. Transactions, categories, and tags (Phase 5)
+
+All routes require a session; state-changing ones the CSRF token. Responses are
+`Cache-Control: no-store`. Bodies and queries are strict Zod schemas from
+`packages/shared/src/schemas/transaction.ts` and `category.ts`, so unknown fields and query
+parameters (including owner IDs, currencies, statuses, and arbitrary sort keys) are rejected.
+
+| Method & path                                | Purpose                                                                                                                                             | Success          |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| `GET /transactions`                          | List: `q`, `type`, `accountId`, `categoryId`, `paymentMethod`, `tags`, `from`, `to`, `minAmount`, `maxAmount`, `status`, `sort`, `page`, `pageSize` | 200              |
+| `GET /transactions/summary`                  | Income, spending, and net per currency for the same filters                                                                                         | 200              |
+| `POST /transactions`                         | Record income, an expense, a transfer, or an adjustment (`Idempotency-Key` optional)                                                                | 201 (200 replay) |
+| `GET /transactions/:id`                      | One transaction with its account(s) and category                                                                                                    | 200              |
+| `PATCH /transactions/:id`                    | Edit (partial; `null` clears; type changes allowed when the result is complete)                                                                     | 200              |
+| `POST /transactions/:id/void`                | Void (optional `reason`; idempotent)                                                                                                                | 200              |
+| `POST /transactions/:id/restore`             | Undo a void (idempotent)                                                                                                                            | 200              |
+| `POST /transactions/bulk`                    | `set_category`, `add_tags`, `remove_tags`, or `void` for 1–100 IDs, all or nothing                                                                  | 200              |
+| `POST /transactions/reconciliations/preview` | Compare an observed balance with CalmCash's at an instant                                                                                           | 200              |
+| `POST /transactions/reconciliations`         | Record the confirmed adjustment (`expectedAdjustmentMinor`, `Idempotency-Key`)                                                                      | 201 (200 replay) |
+| `GET /categories`                            | The user's categories (defaults provisioned once, on first use)                                                                                     | 200              |
+| `POST /categories`                           | Create a category or subcategory                                                                                                                    | 201              |
+| `PATCH /categories/:id`                      | Rename                                                                                                                                              | 200              |
+| `POST /categories/:id/archive` / `restore`   | Archive (with subcategories) / restore; idempotent                                                                                                  | 200              |
+| `GET /tags`                                  | Tags on active transactions, most used first (suggestions)                                                                                          | 200              |
+
+- **List contract.** `TransactionPageDto { items, pagination: { page, pageSize, totalItems,
+totalPages } }`; `pageSize` defaults to 25 and is capped at 100. Every sort (`newest`, `oldest`,
+  `largest`, `smallest`) ends with the ID, so pages never overlap. `from`/`to` are calendar dates in
+  the user's time zone (`to` is inclusive); amount bounds are major units applied per currency with
+  inward rounding (`amountFilterToMinorUnits`). Items are `TransactionListItemDto` (transaction plus
+  account, transfer-destination, and category references), so lists render without extra calls.
+- **Summary contract.** Built from the exact same `WHERE` clause as the list
+  (`transaction-query.ts`), restricted to active income and expenses and grouped by currency —
+  never added across currencies.
+- **Errors.** Input problems are `400 VALIDATION_ERROR` with `body.<field>` details. State problems
+  (archived account, would go below zero, voided transaction, stale reconciliation, reused key) are
+  `409 CONFLICT`. Another user's transaction, category, or account answers exactly like a missing
+  one (`404`, or `400 "Choose one of your accounts"` for a referenced ID).
+- **Layout.** `transactions.routes.ts` · `transactions.controller.ts` (also reads the
+  `Idempotency-Key` header) · `transactions.service.ts` (orchestrates each write inside a ledger) ·
+  `transaction-rules.ts` (pure rules: merge, plan, balance checks, reconciliation) ·
+  `transaction-query.ts` (filters → `WHERE`, sort allow-list, LIKE escaping) ·
+  `transactions.repository.ts` (Prisma, row locks, ledger) · `transactions.mapper.ts`. Categories
+  and tags are separate modules with the same layering. The shared session boundary type lives in
+  `lib/auth-boundary.ts`.
+- **Concurrency.** See [database-design.md §3b](./database-design.md#locking-and-concurrency): one
+  database transaction per write, transaction rows then accounts locked in ID order, balances
+  re-read under the lock, nothing committed unless every rule holds.

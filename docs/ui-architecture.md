@@ -3,7 +3,8 @@
 How the web app (`apps/web`) is designed and built: the visual identity, design tokens, the
 responsive application shell, the component system, and the rules that let later phases replace
 prototype screens without rewriting the shell. Established in Phase 2; Phase 3 added the
-authentication pages, route protection, and real account settings; Phase 4 made Accounts live.
+authentication pages, route protection, and real account settings; Phase 4 made Accounts live;
+Phase 5 made Transactions live (§7b).
 
 ## 1. Design principles
 
@@ -141,51 +142,54 @@ They are owned source files in `components/ui/` and were adapted to the project'
 
 Feature modules (`features/<feature>/`, public API in `index.ts`):
 
-| Feature         | Contents                                                                                                                                                                                                 |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `transactions`  | `TransactionRow`, `TransactionList`, `TransactionExplorer` (client filter over server-rendered rows), `TransactionListItem`                                                                              |
-| `budgets`       | `BudgetProgress`, `getBudgetStatus` (on track / close to limit / over budget)                                                                                                                            |
-| `accounts`      | `AccountsOverview` (live page), `AccountCard`, `AccountBalance`, `AccountsSummary`, `AccountForm`/`AccountFormSheet`, `AccountDetailsSheet`; `account-form-model.ts` (text ⇄ exact minor units)          |
-| `dashboard`     | `BalanceOverview`, `SummaryStats`, `SpendingOverview`, `RecentTransactions`, `BudgetOverview`, view-model types                                                                                          |
-| `auth`          | `AuthProvider`/`useAuth` (session lifecycle), `RequireAuth`, `GuestOnly`, `LoginForm`, `RegisterForm`, `ForgotPasswordForm`, `ResetPasswordForm`, `VerifyEmailPanel`, `UserMenu`, `PasswordRequirements` |
-| `settings`      | `ProfileSettings`, `ChangePasswordForm`, `ActiveSessions`, `AppearanceSettings`, `ResetDisplayPreferences`                                                                                               |
-| `system-status` | `SystemStatusCard` (Phase 1 diagnostics, restyled)                                                                                                                                                       |
+| Feature         | Contents                                                                                                                                                                                                                                                                              |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `transactions`  | `TransactionsPage` (live page), `TransactionRow`, `TransactionList`, `TransactionHistory` (table + phone rows), forms (`TransactionForm`, `ReconcileForm`), sheets (entry, details, filters, bulk, categories), `transaction-form-model.ts`, `transaction-filters.ts` (URL ⇄ filters) |
+| `budgets`       | `BudgetProgress`, `getBudgetStatus` (on track / close to limit / over budget)                                                                                                                                                                                                         |
+| `accounts`      | `AccountsOverview` (live page), `AccountCard`, `AccountBalance`, `AccountsSummary`, `AccountForm`/`AccountFormSheet`, `AccountDetailsSheet`; `account-form-model.ts` (text ⇄ exact minor units)                                                                                       |
+| `dashboard`     | `BalanceOverview`, `SummaryStats`, `SpendingOverview`, `RecentTransactions`, `BudgetOverview`, view-model types                                                                                                                                                                       |
+| `auth`          | `AuthProvider`/`useAuth` (session lifecycle), `RequireAuth`, `GuestOnly`, `LoginForm`, `RegisterForm`, `ForgotPasswordForm`, `ResetPasswordForm`, `VerifyEmailPanel`, `UserMenu`, `PasswordRequirements`                                                                              |
+| `settings`      | `ProfileSettings`, `ChangePasswordForm`, `ActiveSessions`, `AppearanceSettings`, `ResetDisplayPreferences`                                                                                                                                                                            |
+| `system-status` | `SystemStatusCard` (Phase 1 diagnostics, restyled)                                                                                                                                                                                                                                    |
 
-**Transaction pattern.** `TransactionRow` answers _who_ (merchant, or "To {account}" for
-transfers), _why_ (description), _when_ (date in IST), _how_ (category and payment account), and
-_how much_ (`FinancialAmount`), with the same structure on every screen size. It takes shared DTOs
-(`TransactionDto`, `AccountDto`, `CategoryDto`), so Phase 5 can feed it API data unchanged.
+**Transaction pattern.** `TransactionRow` answers _who_ (merchant, "To {account}" for transfers,
+or "Balance adjustment"), _why_ (description or reason), _when_ (date in the user's time zone),
+_how_ (category and payment account), and _how much_ (`FinancialAmount`), with the same structure
+on every screen size. It takes the API's `TransactionListItemDto` (full `AccountDto`/`CategoryDto`
+objects fit too, as in the dashboard preview). Voided rows are dimmed, struck through, and badged.
 
 **Money.** `FinancialAmount` formats with `lib/format.ts`, which converts minor units to an exact
 decimal string (BigInt arithmetic) and formats with `Intl.NumberFormat('en-IN')`. `display` size
 renders the fraction smaller via `formatToParts`. Directions: `credit` (+, income colour),
-`debit` (−, coral), `transfer` (no sign), `balance` (signed). Each also has a screen-reader label.
+`debit` (−, coral), `transfer` (no sign), `adjustment-up`/`adjustment-down` (+/−, neutral colour,
+because a correction is neither income nor spending), `balance` (signed). Each also has a
+screen-reader label; `directionForTransaction` picks one for any transaction.
 
 **Server first.** Pages and most components are Server Components. Client Components are limited
 to the theme toggle, preference sync, sidebar, bottom bar, More sheet, header breadcrumb, user menu,
-confirm dialog, settings controls, the transaction explorer, the system-status card, and the
-authentication feature (provider, guards, forms), which needs the browser to reach the API with the
-session cookie. The
-transaction explorer receives _server-rendered_ rows as props, so formatting runs only on the server
-(no hydration mismatch, and row code is not shipped to the browser).
+confirm dialog, settings controls, the live accounts and transactions features, the system-status
+card, and the authentication feature (provider, guards, forms), which need the browser to reach the
+API with the session cookie. The transactions page reads its filters from the URL with
+`useSearchParams`, so the route wraps it in a `Suspense` boundary (the static shell still
+prerenders).
 
 ## 7. Routes
 
-| Route              | Content in Phase 2                                                                                                                                                  |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/`                | Temporary (307) redirect to `/dashboard` (which sends signed-out visitors to `/login`).                                                                             |
-| `/dashboard`       | Visual prototype: balance overview, money in/out/saved, recent transactions, budgets, spending by category.                                                         |
-| `/transactions`    | Upcoming-feature state and a sample list with working search and type filters.                                                                                      |
-| `/budgets`         | Upcoming-feature state and sample budget progress cards.                                                                                                            |
-| `/accounts`        | **Live data.** Totals per currency (held vs. owed), accounts grouped by classification, active/archived filter, add/edit sheet, details sheet, archive and restore. |
-| `/insights`        | Upcoming-feature state and what to expect (no generated insights).                                                                                                  |
-| `/settings`        | Profile (name, currency, time zone), password change, signed-in devices, theme, preference reset, diagnostics.                                                      |
-| `/login`           | Sign in; notices after sign-out or an ended session; resend link for unconfirmed addresses.                                                                         |
-| `/register`        | Create an account with live password guidance; ends on a "check your inbox" confirmation.                                                                           |
-| `/forgot-password` | Request a reset link; the confirmation never reveals whether an account exists.                                                                                     |
-| `/reset-password`  | Choose a new password from an e-mailed link; handles incomplete, expired, and used links.                                                                           |
-| `/verify-email`    | Consumes the confirmation link; offers a new link when it cannot be used.                                                                                           |
-| unknown URLs       | Branded 404 (HTTP 404).                                                                                                                                             |
+| Route              | Content in Phase 2                                                                                                                                                            |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/`                | Temporary (307) redirect to `/dashboard` (which sends signed-out visitors to `/login`).                                                                                       |
+| `/dashboard`       | Visual prototype: balance overview, money in/out/saved, recent transactions, budgets, spending by category.                                                                   |
+| `/transactions`    | **Live data** (§7b). Record, search, filter, edit, void, restore, bulk-edit, and reconcile; `?accountId=`/filters in the URL; `?reconcile=<id>` and `?new=1` open the sheets. |
+| `/budgets`         | Upcoming-feature state and sample budget progress cards.                                                                                                                      |
+| `/accounts`        | **Live data.** Totals per currency (held vs. owed), accounts grouped by classification, active/archived filter, add/edit sheet, details sheet, archive and restore.           |
+| `/insights`        | Upcoming-feature state and what to expect (no generated insights).                                                                                                            |
+| `/settings`        | Profile (name, currency, time zone), password change, signed-in devices, theme, preference reset, diagnostics.                                                                |
+| `/login`           | Sign in; notices after sign-out or an ended session; resend link for unconfirmed addresses.                                                                                   |
+| `/register`        | Create an account with live password guidance; ends on a "check your inbox" confirmation.                                                                                     |
+| `/forgot-password` | Request a reset link; the confirmation never reveals whether an account exists.                                                                                               |
+| `/reset-password`  | Choose a new password from an e-mailed link; handles incomplete, expired, and used links.                                                                                     |
+| `/verify-email`    | Consumes the confirmation link; offers a new link when it cannot be used.                                                                                                     |
+| unknown URLs       | Branded 404 (HTTP 404).                                                                                                                                                       |
 
 All routes are statically prerendered. Every route in the `(app)` group requires a signed-in user;
 the `(auth)` pages are public, and `/login` and `/register` send signed-in users on to the app.
@@ -209,6 +213,50 @@ the `(auth)` pages are public, and `/login` and `/register` send signed-in users
   (`useAsyncResource().refresh`) without flashing a skeleton, and a status message confirms it.
 - Account accents (`color`) map onto the chart tokens, so both themes keep their checked contrast.
 - The dashboard is unchanged and still shows labelled sample data.
+- Phase 5: account details show how many transactions the balance includes and link to
+  **View transactions** (`/transactions?accountId=…`) and **Correct balance**
+  (`/transactions?reconcile=…`).
+
+## 7b. Transactions page (Phase 5)
+
+- **Live only.** Data comes from `services/transactions.service.ts`, `categories.service.ts`, and
+  `accounts.service.ts`; nothing is stored in the browser and no sample row is ever shown. States
+  are distinct: loading skeleton; error with retry ("Nothing has been lost"); _no accounts yet_ (link
+  to Accounts); _first transaction_ (call to action); _no results_ for active filters (with "Clear
+  search and filters"); _no voided transactions_.
+- **History.** Wide desktops (≥1280px, `xl`) get a table (date, who and why, category, account or
+  "A → B", method, amount, row menu). Narrower screens — phones, tablets, and laptops where the
+  sidebar takes room — get compact `TransactionRow`s with a full-row button that opens details; no
+  table is ever squeezed onto a small screen, and nothing scrolls sideways at 320px.
+- **Search and filters.** A search box (applied 350ms after typing stops), a filter sheet (type,
+  date presets and range, account, category incl. subcategories, payment method, tags, amount range,
+  status), a sort select, and removable chips with "Clear all". Everything lives in the URL with the
+  API's parameter names (`transaction-filters.ts`), so views survive refresh and can be bookmarked;
+  only IDs, dates, amounts, and the typed search text appear there. Any change of filter returns to
+  page 1; pagination is "Previous / Page n of m / Next".
+- **Totals.** One compact card per currency — money in, money out, net — for exactly the list's
+  filters (`summaryQuery` shares the list's parameters), labelled with the period, excluding
+  transfers, adjustments, and voided rows. Hidden in the Voided view.
+- **Entry.** "Add transaction" opens a sheet with a type picker (Expense, Income, Transfer, Adjust
+  balance). Each type shows only its fields; the merchant ("Paid to" / "Received from") follows the
+  amount. Transfers offer only active accounts of the source's currency, never the source itself.
+  Payment method, tags (chips with suggestions from `GET /tags`), and notes sit under "More details".
+  Amounts are parsed exactly in the account's currency; date and time are read in the user's time
+  zone with the shared `zonedDateTimeToInstant`. Errors appear inline; problems from one type are
+  cleared when switching type. The submit button is disabled while saving, and each form instance
+  sends one `Idempotency-Key`, so a retry after a network failure (values kept) cannot duplicate.
+- **Balance correction.** "Correct a balance" (or "Adjust balance" in the type picker, or the account
+  details link) asks for the balance the bank shows — or, for cards, the amount owed — plus a reason,
+  then shows the API's preview ("Amount owed goes up by ₹500.00") and records only after "Record
+  adjustment". If the balance changed meanwhile, it offers "Review again".
+- **Details, edit, void.** The details sheet lists every field (time in the user's zone). Edit opens
+  the same form prefilled and sends only changed fields (with `null` for fields a new type no longer
+  uses). Void asks for confirmation (optional reason) in a bottom sheet on phones; voided
+  transactions are restored from the Voided view. Transactions on archived accounts are read-only.
+- **Bulk.** "Select" adds checkboxes; a sticky toolbar offers Categorise, Add tags, Remove tags, and
+  Void for the selection (all or nothing, as the API guarantees).
+- **Categories.** A sheet lists categories by kind with add (optionally inside a top-level one),
+  rename, archive, and restore.
 
 ## 8. Prototype data rules
 

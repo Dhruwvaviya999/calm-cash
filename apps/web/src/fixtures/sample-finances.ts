@@ -36,7 +36,7 @@ const audit = { userId: SAMPLE_USER_ID, createdAt: CREATED_AT, updatedAt: CREATE
 // --- Categories -------------------------------------------------------------------------------
 
 function category(sequence: number, name: string, kind: CategoryDto['kind']): CategoryDto {
-  return { id: sampleId(100 + sequence), name, kind, ...audit };
+  return { id: sampleId(100 + sequence), name, kind, status: 'active', ...audit };
 }
 
 export const sampleCategories = {
@@ -105,19 +105,45 @@ type CategorisedInput = SampleTransactionInput & {
   notes?: string;
 };
 
+/** Sample rows are active and untagged. */
+function sampleState(): Pick<
+  TransactionDto,
+  'userId' | 'createdAt' | 'updatedAt' | 'tags' | 'status'
+> {
+  return { ...audit, tags: [], status: 'active' };
+}
+
 function income({ sequence, ...rest }: CategorisedInput): TransactionDto {
-  return { id: sampleId(300 + sequence), type: 'income', currency: 'INR', ...rest, ...audit };
+  return {
+    id: sampleId(300 + sequence),
+    type: 'income',
+    currency: 'INR',
+    ...rest,
+    ...sampleState(),
+  };
 }
 
 function expense({ sequence, ...rest }: CategorisedInput): TransactionDto {
-  return { id: sampleId(300 + sequence), type: 'expense', currency: 'INR', ...rest, ...audit };
+  return {
+    id: sampleId(300 + sequence),
+    type: 'expense',
+    currency: 'INR',
+    ...rest,
+    ...sampleState(),
+  };
 }
 
 function transfer({
   sequence,
   ...rest
 }: SampleTransactionInput & { transferAccountId: EntityId }): TransactionDto {
-  return { id: sampleId(300 + sequence), type: 'transfer', currency: 'INR', ...rest, ...audit };
+  return {
+    id: sampleId(300 + sequence),
+    type: 'transfer',
+    currency: 'INR',
+    ...rest,
+    ...sampleState(),
+  };
 }
 
 const c = sampleCategories;
@@ -264,9 +290,9 @@ export const sampleTransactionItems: readonly TransactionListItem[] = sampleTran
     transaction,
     account: requireAccount(transaction.accountId),
     category:
-      transaction.type === 'transfer'
-        ? undefined
-        : categoriesById.get(transaction.categoryId ?? ''),
+      transaction.type === 'income' || transaction.type === 'expense'
+        ? categoriesById.get(transaction.categoryId ?? '')
+        : undefined,
     transferAccount:
       transaction.type === 'transfer' ? requireAccount(transaction.transferAccountId) : undefined,
   }),

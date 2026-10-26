@@ -20,11 +20,37 @@ export type AccountType = (typeof ACCOUNT_TYPES)[number];
 
 /**
  * `income` and `expense` change a single account's balance; `transfer` moves money from
- * `accountId` to `transferAccountId` and is excluded from income/expense reporting.
+ * `accountId` to `transferAccountId`; `balance_adjustment` corrects one account's balance by an
+ * explicit amount and direction (reconciliation). Transfers and adjustments are never income or
+ * spending.
  */
-export const TRANSACTION_TYPES = ['income', 'expense', 'transfer'] as const;
+export const TRANSACTION_TYPES = ['income', 'expense', 'transfer', 'balance_adjustment'] as const;
 
 export type TransactionType = (typeof TRANSACTION_TYPES)[number];
+
+/**
+ * Which way a balance adjustment moves the account's signed net position. For a credit card,
+ * `decrease` means the amount owed goes up.
+ */
+export const ADJUSTMENT_DIRECTIONS = ['increase', 'decrease'] as const;
+
+export type AdjustmentDirection = (typeof ADJUSTMENT_DIRECTIONS)[number];
+
+/** How a payment was made. Optional on income, expenses, and transfers. */
+export const PAYMENT_METHODS = [
+  'cash',
+  'upi',
+  'bank_transfer',
+  'debit_card',
+  'credit_card',
+  'net_banking',
+  'cheque',
+  'digital_wallet',
+  'direct_debit',
+  'other',
+] as const;
+
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
 export const CATEGORY_KINDS = ['income', 'expense'] as const;
 
@@ -46,4 +72,7 @@ export const TEXT_LIMITS = {
   transactionDescription: 255,
   transactionMerchant: 120,
   transactionNotes: 2000,
+  transactionVoidReason: 500,
+  transactionTag: 32,
+  transactionSearch: 100,
 } as const;

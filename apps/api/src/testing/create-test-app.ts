@@ -6,6 +6,9 @@ import { createBackgroundTasks } from '../lib/background-tasks';
 import { createPrismaClient } from '../lib/database';
 import { createPrismaAccountsRepository } from '../modules/accounts/accounts.repository';
 import { createPrismaAuthRepository } from '../modules/auth/auth.repository';
+import { createPrismaCategoriesRepository } from '../modules/categories/categories.repository';
+import { createPrismaTagsRepository } from '../modules/tags/tags.repository';
+import { createPrismaTransactionsRepository } from '../modules/transactions/transactions.repository';
 import { createArgon2PasswordHasher } from '../modules/auth/password-hasher';
 import { createInMemoryEmailService } from './in-memory-email';
 
@@ -54,16 +57,16 @@ export function createOfflineAuthDependencies(
 /** Builds the real application with silent logging and a stubbed database check. */
 export function createTestApp(overrides: Partial<AppDependencies> = {}): Express {
   const logger = pino({ level: 'silent' });
+  const offline = createPrismaClient('postgresql://offline:offline@127.0.0.1:9/offline', logger);
   return createApp({
     config: TEST_APP_CONFIG,
     logger,
     checkDatabase: () => Promise.resolve(true),
     auth: createOfflineAuthDependencies(),
-    accounts: {
-      repository: createPrismaAccountsRepository(
-        createPrismaClient('postgresql://offline:offline@127.0.0.1:9/offline', logger),
-      ),
-    },
+    accounts: { repository: createPrismaAccountsRepository(offline) },
+    transactions: { repository: createPrismaTransactionsRepository(offline) },
+    categories: { repository: createPrismaCategoriesRepository(offline) },
+    tags: { repository: createPrismaTagsRepository(offline) },
     ...overrides,
   });
 }

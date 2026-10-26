@@ -28,6 +28,8 @@ const expense = {
   amountMinor: '45000',
   currency: 'INR',
   description: 'Groceries',
+  tags: [],
+  status: 'active',
   occurredAt: TIMESTAMP,
   createdAt: TIMESTAMP,
   updatedAt: TIMESTAMP,
@@ -126,6 +128,24 @@ describe('transactionDtoSchema', () => {
 
   it('rejects unknown transaction types', () => {
     expect(transactionDtoSchema.safeParse({ ...expense, type: 'refund' }).success).toBe(false);
+  });
+
+  it('accepts balance adjustments only with a direction and without a category', () => {
+    const adjustment = { ...expense, type: 'balance_adjustment', adjustmentDirection: 'increase' };
+    expect(transactionDtoSchema.safeParse(adjustment).success).toBe(true);
+    const { adjustmentDirection: _omitted, ...withoutDirection } = adjustment;
+    expect(transactionDtoSchema.safeParse(withoutDirection).success).toBe(false);
+    expect(
+      transactionDtoSchema.safeParse({ ...adjustment, adjustmentDirection: 'sideways' }).success,
+    ).toBe(false);
+  });
+
+  it('keeps the void state and its timestamp consistent', () => {
+    expect(transactionDtoSchema.safeParse({ ...expense, status: 'voided' }).success).toBe(false);
+    expect(
+      transactionDtoSchema.safeParse({ ...expense, status: 'voided', voidedAt: TIMESTAMP }).success,
+    ).toBe(true);
+    expect(transactionDtoSchema.safeParse({ ...expense, voidedAt: TIMESTAMP }).success).toBe(false);
   });
 
   it('requires a distinct destination account for transfers', () => {

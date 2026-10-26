@@ -206,6 +206,29 @@ describe('authentication boundary (no database)', () => {
     expect(response.get('Cache-Control')).toBe('no-store');
   });
 
+  it('protects every financial route before touching the database', async () => {
+    const app = createTestApp();
+    for (const path of ['/transactions', '/transactions/summary', '/categories', '/tags']) {
+      const response = await request(app).get(`${API_V1_PREFIX}${path}`).expect(401);
+      expect(apiErrorResponseSchema.parse(response.body).error.code).toBe('UNAUTHORIZED');
+    }
+    await request(app)
+      .post(`${API_V1_PREFIX}/transactions`)
+      .set('Origin', TEST_ALLOWED_ORIGIN)
+      .send({})
+      .expect(401);
+  });
+
+  it('allows the idempotency header in cross-origin requests from the web app', async () => {
+    const response = await request(createTestApp())
+      .options(`${API_V1_PREFIX}/transactions`)
+      .set('Origin', TEST_ALLOWED_ORIGIN)
+      .set('Access-Control-Request-Method', 'POST')
+      .set('Access-Control-Request-Headers', 'content-type,idempotency-key,x-csrf-token')
+      .expect(204);
+    expect(response.get('Access-Control-Allow-Headers')).toContain('idempotency-key');
+  });
+
   it('rate-limits repeated failed sign-ins from one client', async () => {
     const app = createTestApp({
       auth: createOfflineAuthDependencies({
