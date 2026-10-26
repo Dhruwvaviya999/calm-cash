@@ -8,7 +8,7 @@ Everything needed to set up, run, test, and troubleshoot CalmCash locally.
 | ----------------------- | --------------------------------- | ------------------------------------------------------------------------------- |
 | Node.js                 | **24 LTS** (≥ 24.11)              | `.nvmrc` pins the major version (`nvm use`).                                    |
 | pnpm                    | **11.x**                          | `corepack enable` uses the version pinned in `package.json` (`packageManager`). |
-| Docker + Docker Compose | Docker Engine 24+ with Compose v2 | Docker Desktop on Windows/macOS. Only needed for the local database.            |
+| Docker + Docker Compose | Docker Engine 24+ with Compose v2 | Docker Desktop on Windows/macOS. For the local database and e-mail catcher.     |
 | Git                     | any recent version                |                                                                                 |
 
 PostgreSQL itself does **not** need to be installed — it runs in a container. A `psql` client is
@@ -35,8 +35,9 @@ cp .env.example .env                              # backend + database
 cp apps/web/.env.example apps/web/.env.local      # web app
 #   (PowerShell: Copy-Item .env.example .env; Copy-Item apps/web/.env.example apps/web/.env.local)
 
-# 3. Start PostgreSQL and wait until it is healthy
+# 3. Start PostgreSQL and the Mailpit e-mail catcher, and wait until they are healthy
 pnpm db:up
+pnpm mail:up
 
 # 4. Apply all migrations
 pnpm db:migrate
@@ -47,9 +48,12 @@ pnpm dev
 
 Then open:
 
-- Web app: <http://localhost:3000> (redirects to the dashboard). In **Settings → About and
+- Web app: <http://localhost:3000>. Signed-out visitors are sent to **Sign in**. Create an account
+  at `/register`, then confirm it from the inbox below and sign in. In **Settings → About and
   diagnostics**, the "System status" card should report the API as **Online** and the database as
   **Connected**.
+- E-mail inbox (Mailpit): <http://localhost:8025> — confirmation and password-reset messages land
+  here; nothing leaves your machine.
 - API liveness: <http://localhost:4000/api/v1/health>
 - API readiness: <http://localhost:4000/api/v1/health/ready>
 
@@ -60,15 +64,16 @@ The placeholder values in `.env.example` work as-is for local development. Chang
 
 All commands run from the repository root.
 
-| Command             | What it does                                                                      |
-| ------------------- | --------------------------------------------------------------------------------- |
-| `pnpm dev`          | Runs the API (`:4000`, restarts on change) and the web app (`:3000`, hot reload). |
-| `pnpm build`        | Production builds: `apps/api/dist/server.js` (tsup) and `apps/web/.next` (Next).  |
-| `pnpm lint`         | ESLint across the workspace; warnings fail the run.                               |
-| `pnpm typecheck`    | `tsc` for root tooling, the shared package, the API, and the web app.             |
-| `pnpm test`         | Vitest suites of all packages.                                                    |
-| `pnpm format`       | Formats all files with Prettier.                                                  |
-| `pnpm format:check` | Verifies formatting without writing (use in CI).                                  |
+| Command                 | What it does                                                                      |
+| ----------------------- | --------------------------------------------------------------------------------- |
+| `pnpm dev`              | Runs the API (`:4000`, restarts on change) and the web app (`:3000`, hot reload). |
+| `pnpm build`            | Production builds: `apps/api/dist/server.js` (tsup) and `apps/web/.next` (Next).  |
+| `pnpm lint`             | ESLint across the workspace; warnings fail the run.                               |
+| `pnpm typecheck`        | `tsc` for root tooling, the shared package, the API, and the web app.             |
+| `pnpm test`             | Vitest suites of all packages (no database needed).                               |
+| `pnpm test:integration` | API integration tests against the `TEST_DATABASE_URL` database.                   |
+| `pnpm format`           | Formats all files with Prettier.                                                  |
+| `pnpm format:check`     | Verifies formatting without writing (use in CI).                                  |
 
 Run a script for one package with `--filter`:
 
@@ -89,14 +94,15 @@ pnpm --filter @calmcash/web start        # next start on :3000
 
 ## 4. Database
 
-| Command            | What it does                                                                           |
-| ------------------ | -------------------------------------------------------------------------------------- |
-| `pnpm db:up`       | Starts the PostgreSQL 18 container and waits for its health check.                     |
-| `pnpm db:down`     | Stops and removes the container. Data persists in the `calmcash_postgres-data` volume. |
-| `pnpm db:generate` | Regenerates the Prisma Client into `apps/api/src/generated/prisma` (git-ignored).      |
-| `pnpm db:migrate`  | `prisma migrate dev`: applies pending migrations; with schema changes, creates one.    |
-| `pnpm db:deploy`   | `prisma migrate deploy`: applies pending migrations only (CI/production).              |
-| `pnpm db:studio`   | Opens Prisma Studio to browse and edit data.                                           |
+| Command            | What it does                                                                            |
+| ------------------ | --------------------------------------------------------------------------------------- |
+| `pnpm db:up`       | Starts the PostgreSQL 18 container and waits for its health check.                      |
+| `pnpm mail:up`     | Starts Mailpit (SMTP on `127.0.0.1:1025`, inbox on <http://localhost:8025>).            |
+| `pnpm db:down`     | Stops and removes the containers. Data persists in the `calmcash_postgres-data` volume. |
+| `pnpm db:generate` | Regenerates the Prisma Client into `apps/api/src/generated/prisma` (git-ignored).       |
+| `pnpm db:migrate`  | `prisma migrate dev`: applies pending migrations; with schema changes, creates one.     |
+| `pnpm db:deploy`   | `prisma migrate deploy`: applies pending migrations only (CI/production).               |
+| `pnpm db:studio`   | Opens Prisma Studio to browse and edit data.                                            |
 
 Common workflows:
 
@@ -128,27 +134,37 @@ after changing `schema.prisma` (`pnpm install` also runs it).
 ## 5. Testing
 
 Tests use [Vitest](https://vitest.dev) in every package and
-[Supertest](https://github.com/ladjs/supertest) for in-process HTTP tests of the API. No running
-database or server is needed: API tests build the app with `createApp()` and stub the
-database health check.
+[Supertest](https://github.com/ladjs/supertest) for in-process HTTP tests of the API. `pnpm test`
+needs no running database or server: API tests build the app with `createApp()` and stub the
+database health check. Database-backed flows (authentication end to end) live in
+`*.integration.test.ts` files and run with `pnpm test:integration`.
 
 ```bash
 pnpm test                                        # everything
 pnpm --filter @calmcash/api test                 # one package
 pnpm --filter @calmcash/api exec vitest          # watch mode
 pnpm --filter @calmcash/api exec vitest src/app.test.ts   # one file
+pnpm test:integration                            # API against a real database (see below)
 ```
 
-| Package  | Suites                                                                                                                                                                                                                             |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `shared` | Minor-unit money helpers; schema validation rules; compile-time schema ⇄ interface equality.                                                                                                                                       |
-| `api`    | Health endpoints, error envelopes, CORS, security headers, request IDs, env validation, the validation convention, graceful shutdown, Prisma enum ⇄ shared literal parity.                                                         |
-| `web`    | API client; exact money/date formatting; navigation rules; the theme bootstrap script (run in a sandbox); budget status; fixtures against shared schemas; `FinancialAmount` and `TransactionRow` rendered with `react-dom/server`. |
+**Integration tests** use `TEST_DATABASE_URL` from the root `.env` (template in `.env.example`). It
+must name a database ending in `_test` and differ from `DATABASE_URL`; the suite refuses to run
+otherwise. The database is created and migrated automatically (`prisma migrate deploy`) on the same
+PostgreSQL server, and every table is truncated before each test — the development database is
+never touched. Run `pnpm db:up` first. Integration files run one at a time.
+
+| Package  | Suites                                                                                                                                                                                                                                                                                                                                 |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `shared` | Minor-unit money helpers; schema validation rules; compile-time schema ⇄ interface equality. Auth input/response schemas and the password policy.                                                                                                                                                                                      |
+| `api`    | Health endpoints, error envelopes, CORS, origin check, rate limiting, security headers, request IDs, env validation, the validation convention, graceful shutdown, Prisma enum ⇄ shared literal parity, token/cookie/Argon2/user-agent helpers, e-mail templates. Integration: the complete authentication API.                        |
+| `web`    | API client (credentials, CSRF header and retry); safe return paths; money/date formatting; navigation rules; the theme bootstrap script; budget status; fixtures against shared schemas; static rendering of finance components; in jsdom: auth forms, route guards, auth provider, user menu, settings, mobile navigation, and theme. |
 
 Type-level assertions (`expectTypeOf`) are checked by `pnpm typecheck`, not by `pnpm test`.
 
-Web component tests render to static HTML with `react-dom/server` in Vitest's Node environment, so
-no DOM emulation library is needed. Name them `*.test.tsx`.
+Web component tests render to static HTML with `react-dom/server` in Vitest's Node environment.
+Interactive tests (forms, guards, menus) opt into jsdom with a `// @vitest-environment jsdom` first
+line and use Testing Library; `src/testing/auth.tsx` builds auth context values. Name them
+`*.test.tsx`.
 
 **Checking the UI by hand.** Use your browser's device toolbar at 320, 375, 430, 768, 1024, and
 1440px, in light and dark themes (Settings → Appearance or the header theme menu). Phones should
@@ -158,7 +174,7 @@ horizontal scrolling at any width.
 **Before pushing**, run the same gates CI should run:
 
 ```bash
-pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build
+pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration && pnpm build
 ```
 
 ## 6. Conventions
@@ -206,6 +222,29 @@ origin such as `http://localhost:4000` (no `/api/v1`). Restart `pnpm dev` after 
 The API is not running or not reachable at `NEXT_PUBLIC_API_URL`. Check the `apps/api dev:` lines
 of `pnpm dev`. If the API is up, check that `CORS_ORIGINS` contains the exact origin of the web app
 (scheme, host, and port, with no trailing slash). The rest of the app keeps working without the API.
+
+**Registration answers "We could not send the email right now" (503 `EMAIL_DELIVERY_FAILED`)**
+The API cannot reach the SMTP server. Run `pnpm mail:up` (the API logs "SMTP server is not
+reachable" at startup when it is down) or check the `SMTP_*` variables, then request a new link
+from the sign-in or confirmation page.
+
+**Signing in works but you are immediately signed out again**
+The session cookie is `SameSite=Strict` and host-only. Open the web app on the same host name as the
+API in `NEXT_PUBLIC_API_URL` (`localhost` for both, not `localhost` + `127.0.0.1`), and make sure
+`CORS_ORIGINS` contains the exact web origin.
+
+**Requests fail with `ORIGIN_NOT_ALLOWED` or `CSRF_TOKEN_INVALID`**
+`ORIGIN_NOT_ALLOWED`: the web origin is missing from `CORS_ORIGINS`. `CSRF_TOKEN_INVALID` from a tool
+such as curl: send the `csrfToken` from the login or `/auth/me` response as `x-csrf-token`.
+
+**`pnpm test:integration` refuses to start**
+Set `TEST_DATABASE_URL` in `.env` to a database whose name ends in `_test` (see `.env.example`) and
+start PostgreSQL with `pnpm db:up`.
+
+**`pnpm db:up` or `pnpm mail:up` fails because a port is already allocated**
+Another container or program uses 5433, 1025, or 8025. Change `POSTGRES_PORT` (plus the port in
+`DATABASE_URL` and `TEST_DATABASE_URL`) or `MAILPIT_SMTP_PORT`/`MAILPIT_UI_PORT` (plus `SMTP_PORT`)
+in `.env`.
 
 **`pnpm typecheck` fails in `.next/dev/types/validator.ts` after deleting or renaming a page**
 Those route types were generated by an earlier `next dev` run. Delete `apps/web/.next/dev` (or

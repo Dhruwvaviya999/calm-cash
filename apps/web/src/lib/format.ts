@@ -10,7 +10,7 @@ import {
 // Presentation formatting. Money stays exact: minor units are converted to a decimal string with
 // integer arithmetic and passed to Intl as a string, so no value is ever a floating-point number.
 
-/** Until user profiles exist (Phase 3), CalmCash formats for India. */
+/** Default display conventions (India); signed-in views pass the user's own time zone. */
 export const DISPLAY_LOCALE = 'en-IN';
 export const DISPLAY_TIME_ZONE = 'Asia/Kolkata';
 
@@ -129,4 +129,29 @@ export function formatDate(value: IsoDateTimeString, style: DateStyle = 'dayMont
   // Calendar dates are anchored at noon UTC so every time zone shows the same day.
   const instant = value.length === 10 ? `${value}T12:00:00.000Z` : value;
   return dateFormatters[style].format(new Date(instant));
+}
+
+const dateTimeFormatters = new Map<string, Intl.DateTimeFormat>();
+
+/**
+ * Formats an instant as date and time in an IANA time zone (the user's preference when known),
+ * e.g. `"26 Oct 2026, 10:45 am"`.
+ */
+export function formatDateTime(
+  value: IsoDateTimeString,
+  timeZone: string = DISPLAY_TIME_ZONE,
+): string {
+  let formatter = dateTimeFormatters.get(timeZone);
+  if (formatter === undefined) {
+    formatter = new Intl.DateTimeFormat(DISPLAY_LOCALE, {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZone,
+    });
+    dateTimeFormatters.set(timeZone, formatter);
+  }
+  return formatter.format(new Date(value));
 }

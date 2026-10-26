@@ -6,6 +6,33 @@ export type NodeEnvironment = (typeof NODE_ENVIRONMENTS)[number];
 export const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'] as const;
 export type LogLevel = (typeof LOG_LEVELS)[number];
 
+/** How the session cookie is written. Production uses the `__Host-` prefix, which requires `Secure`. */
+export interface SessionConfig {
+  cookieName: string;
+  /** `Secure` attribute; always true in production. */
+  secureCookie: boolean;
+  /** Absolute session lifetime, regardless of activity. */
+  maxAgeMs: number;
+  /** A session unused for this long is no longer accepted. */
+  idleTimeoutMs: number;
+}
+
+export interface SmtpConfig {
+  host: string;
+  port: number;
+  /** Implicit TLS (usually port 465). When false, STARTTLS is used if the server offers it. */
+  secure: boolean;
+  /** Refuse to send without TLS (STARTTLS). Always true in production unless `secure`. */
+  requireTls: boolean;
+  auth: { user: string; password: string } | undefined;
+}
+
+export interface EmailConfig {
+  /** RFC 5322 sender, e.g. `CalmCash <no-reply@calmcash.example>`. */
+  from: string;
+  smtp: SmtpConfig;
+}
+
 /** Validated, typed runtime configuration of the API. Never read `process.env` elsewhere. */
 export interface AppConfig {
   nodeEnv: NodeEnvironment;
@@ -13,10 +40,23 @@ export interface AppConfig {
   port: number;
   databaseUrl: string;
   corsOrigins: readonly string[];
+  /** Origin of the web app; links in e-mails point here. Always one of `corsOrigins`. */
+  webAppUrl: string;
+  /** Number of reverse proxies in front of the API whose `X-Forwarded-For` can be trusted. */
+  trustProxyHops: number;
   jsonBodyLimit: string;
   logLevel: LogLevel;
   shutdownTimeoutMs: number;
+  session: SessionConfig;
+  email: EmailConfig;
 }
+
+const DEVELOPMENT_SESSION_COOKIE = 'calmcash_session';
+/** `__Host-` cookies must be Secure, have `Path=/`, and no `Domain`, so they stay host-only. */
+const PRODUCTION_SESSION_COOKIE = '__Host-calmcash_session';
+
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
 
 const originSchema = z
   .url({ protocol: /^https?$/ })
@@ -24,30 +64,106 @@ const originSchema = z
     message: 'Must be a bare origin such as "https://app.example.com" (no path or trailing slash).',
   });
 
-const envSchema = z.object({
-  NODE_ENV: z.enum(NODE_ENVIRONMENTS).default('development'),
-  API_HOST: z.string().min(1).default('localhost'),
-  API_PORT: z.coerce.number().int().min(1).max(65_535).default(4000),
-  DATABASE_URL: z.url({
-    protocol: /^postgres(?:ql)?$/,
-    error: 'Must be a PostgreSQL connection URL (postgresql://user:password@host:port/database).',
-  }),
-  CORS_ORIGINS: z
-    .string()
-    .transform((value) =>
-      value
-        .split(',')
-        .map((origin) => origin.trim())
-        .filter((origin) => origin.length > 0),
-    )
-    .pipe(z.array(originSchema).min(1, 'At least one origin is required.')),
-  JSON_BODY_LIMIT: z
-    .string()
-    .regex(/^\d+(?:b|kb|mb)$/i, 'Must be a size such as "100kb" or "1mb".')
-    .default('100kb'),
-  LOG_LEVEL: z.enum(LOG_LEVELS).default('info'),
-  SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(10_000),
-});
+const booleanFlagSchema = z
+  .enum(['true', 'false'], { error: 'Must be "true" or "false".' })
+  .transform((value) => value === 'true');
+
+/** Empty strings count as "not set", so `SMTP_USER=` in a .env file behaves like an absent value. */
+const optionalString = z
+  .string()
+  .optional()
+  .transform((value) => (value === undefined || value.trim() === '' ? undefined : value));
+
+const envSchema = z
+  .object({
+    NODE_ENV: z.enum(NODE_ENVIRONMENTS).default('development'),
+    API_HOST: z.string().min(1).default('localhost'),
+    API_PORT: z.coerce.number().int().min(1).max(65_535).default(4000),
+    DATABASE_URL: z.url({
+      protocol: /^postgres(?:ql)?$/,
+      error: 'Must be a PostgreSQL connection URL (postgresql://user:password@host:port/database).',
+    }),
+    CORS_ORIGINS: z
+      .string()
+      .transform((value) =>
+        value
+          .split(',')
+          .map((origin) => origin.trim())
+          .filter((origin) => origin.length > 0),
+      )
+      .pipe(z.array(originSchema).min(1, 'At least one origin is required.')),
+    WEB_APP_URL: optionalString.pipe(originSchema.optional()),
+    TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(0),
+    JSON_BODY_LIMIT: z
+      .string()
+      .regex(/^\d+(?:b|kb|mb)$/i, 'Must be a size such as "100kb" or "1mb".')
+      .default('100kb'),
+    LOG_LEVEL: z.enum(LOG_LEVELS).default('info'),
+    SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(10_000),
+    SESSION_MAX_AGE_DAYS: z.coerce.number().int().min(1).max(90).default(14),
+    SESSION_IDLE_TIMEOUT_HOURS: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(90 * 24)
+      .default(72),
+    SMTP_HOST: optionalString,
+    SMTP_PORT: z.coerce.number().int().min(1).max(65_535).default(1025),
+    SMTP_SECURE: booleanFlagSchema.default(false),
+    SMTP_USER: optionalString,
+    SMTP_PASSWORD: optionalString,
+    EMAIL_FROM: optionalString,
+  })
+  .superRefine((env, context) => {
+    const production = env.NODE_ENV === 'production';
+    const webAppUrl = env.WEB_APP_URL ?? env.CORS_ORIGINS[0];
+
+    if (webAppUrl !== undefined && !env.CORS_ORIGINS.includes(webAppUrl)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['WEB_APP_URL'],
+        message: 'Must be one of the origins listed in CORS_ORIGINS.',
+      });
+    }
+    if (env.SESSION_IDLE_TIMEOUT_HOURS > env.SESSION_MAX_AGE_DAYS * 24) {
+      context.addIssue({
+        code: 'custom',
+        path: ['SESSION_IDLE_TIMEOUT_HOURS'],
+        message: 'Must not exceed SESSION_MAX_AGE_DAYS.',
+      });
+    }
+    if ((env.SMTP_USER === undefined) !== (env.SMTP_PASSWORD === undefined)) {
+      context.addIssue({
+        code: 'custom',
+        path: [env.SMTP_USER === undefined ? 'SMTP_USER' : 'SMTP_PASSWORD'],
+        message: 'Set both SMTP_USER and SMTP_PASSWORD, or neither.',
+      });
+    }
+
+    if (production) {
+      // Secure cookies only reach the API over HTTPS, and e-mailed links must be HTTPS too.
+      for (const origin of env.CORS_ORIGINS) {
+        if (!origin.startsWith('https://')) {
+          context.addIssue({
+            code: 'custom',
+            path: ['CORS_ORIGINS'],
+            message: 'Production origins must use https.',
+          });
+          break;
+        }
+      }
+      // Development defaults point at the local Mailpit catcher; production must say where mail goes.
+      for (const name of ['SMTP_HOST', 'EMAIL_FROM'] as const) {
+        if (env[name] === undefined) {
+          context.addIssue({
+            code: 'custom',
+            path: [name],
+            message: 'Required in production (verification and password-reset e-mails need it).',
+          });
+        }
+      }
+    }
+  });
 
 export type EnvParseResult =
   { success: true; config: AppConfig } | { success: false; issues: readonly string[] };
@@ -70,6 +186,9 @@ export function parseEnv(source: Readonly<Record<string, string | undefined>>): 
   }
 
   const env = result.data;
+  const production = env.NODE_ENV === 'production';
+  const [firstOrigin = ''] = env.CORS_ORIGINS;
+
   return {
     success: true,
     config: {
@@ -78,9 +197,30 @@ export function parseEnv(source: Readonly<Record<string, string | undefined>>): 
       port: env.API_PORT,
       databaseUrl: env.DATABASE_URL,
       corsOrigins: env.CORS_ORIGINS,
+      webAppUrl: env.WEB_APP_URL ?? firstOrigin,
+      trustProxyHops: env.TRUST_PROXY_HOPS,
       jsonBodyLimit: env.JSON_BODY_LIMIT,
       logLevel: env.LOG_LEVEL,
       shutdownTimeoutMs: env.SHUTDOWN_TIMEOUT_MS,
+      session: {
+        cookieName: production ? PRODUCTION_SESSION_COOKIE : DEVELOPMENT_SESSION_COOKIE,
+        secureCookie: production,
+        maxAgeMs: env.SESSION_MAX_AGE_DAYS * DAY_MS,
+        idleTimeoutMs: env.SESSION_IDLE_TIMEOUT_HOURS * HOUR_MS,
+      },
+      email: {
+        from: env.EMAIL_FROM ?? 'CalmCash <no-reply@calmcash.localhost>',
+        smtp: {
+          host: env.SMTP_HOST ?? 'localhost',
+          port: env.SMTP_PORT,
+          secure: env.SMTP_SECURE,
+          requireTls: production && !env.SMTP_SECURE,
+          auth:
+            env.SMTP_USER === undefined || env.SMTP_PASSWORD === undefined
+              ? undefined
+              : { user: env.SMTP_USER, password: env.SMTP_PASSWORD },
+        },
+      },
     },
   };
 }

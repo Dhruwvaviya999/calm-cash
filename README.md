@@ -3,21 +3,24 @@
 CalmCash is an AI-powered personal finance tracker. The roadmap covers transaction management,
 budgeting, bank statement imports, financial analytics, AI insights, and recurring payments.
 
-> **Status — Phase 2 (design system and app shell) complete.** On top of the Phase 1 foundation
-> (monorepo, API, shared contracts, database, quality gates), the web app now has the CalmCash
-> visual identity, a responsive shell with mobile bottom navigation, a reusable component system,
-> and a clearly labelled design prototype. Authentication arrives in Phase 3.
+> **Status — Phase 3 (authentication, profiles, and security) complete.** On top of the Phase 1
+> foundation and the Phase 2 design system, people can register, confirm their e-mail address,
+> sign in with server-side sessions, recover and change passwords, manage their signed-in devices,
+> and edit their profile. Every in-app page requires a signed-in user. Financial screens still show
+> clearly labelled sample data; real accounts arrive in Phase 4.
 
 ## Tech stack
 
-| Layer       | Technology                                                                                           |
-| ----------- | ---------------------------------------------------------------------------------------------------- |
-| Web         | Next.js 16 (App Router, Turbopack), React 19, Tailwind CSS 4, shadcn/ui (Radix), Lucide icons, Geist |
-| API         | Node.js 24, Express 5, pino, Helmet                                                                  |
-| Data        | PostgreSQL 18, Prisma 7 (`prisma-client` generator + `@prisma/adapter-pg`)                           |
-| Contracts   | TypeScript 6 (strict), Zod 4 — shared by web and API via `@calmcash/shared`                          |
-| Tooling     | pnpm 11 workspaces, Vitest 5, Supertest, ESLint 9 + typescript-eslint, Prettier                      |
-| Local infra | Docker Compose                                                                                       |
+| Layer       | Technology                                                                                               |
+| ----------- | -------------------------------------------------------------------------------------------------------- |
+| Web         | Next.js 16 (App Router, Turbopack), React 19, Tailwind CSS 4, shadcn/ui (Radix), Lucide icons, Geist     |
+| API         | Node.js 24, Express 5, pino, Helmet                                                                      |
+| Data        | PostgreSQL 18, Prisma 7 (`prisma-client` generator + `@prisma/adapter-pg`)                               |
+| Auth        | Server-side sessions in PostgreSQL, HttpOnly cookies, CSRF tokens, Argon2id, express-rate-limit          |
+| E-mail      | nodemailer over SMTP; Mailpit catches mail locally                                                       |
+| Contracts   | TypeScript 6 (strict), Zod 4 — shared by web and API via `@calmcash/shared`                              |
+| Tooling     | pnpm 11 workspaces, Vitest 5, Supertest, Testing Library + jsdom, ESLint 9 + typescript-eslint, Prettier |
+| Local infra | Docker Compose (PostgreSQL, Mailpit)                                                                     |
 
 ## Repository structure
 
@@ -31,7 +34,7 @@ calmcash/
 │   │       ├── config/      Validated environment configuration
 │   │       ├── lib/         Database client, logger, errors, request IDs, shutdown
 │   │       ├── middleware/  Request logging, validation, 404, error handler
-│   │       ├── modules/     Feature modules (health so far)
+│   │       ├── modules/     Feature modules (health, auth)
 │   │       └── routes/      Versioned routers (/api/v1)
 │   └── web/                 Next.js web app (TypeScript)
 │       └── src/
@@ -49,7 +52,7 @@ calmcash/
 │   ├── schema.prisma        Database schema
 │   └── migrations/          Versioned SQL migrations
 ├── docs/                    Architecture, UI architecture, database design, development guide
-├── compose.yaml             Local PostgreSQL
+├── compose.yaml             Local PostgreSQL and Mailpit
 ├── prisma.config.ts         Prisma CLI configuration
 ├── eslint.config.mjs        Workspace lint rules
 ├── tsconfig.base.json       Shared strict TypeScript settings
@@ -66,33 +69,39 @@ pnpm install                                     # installs deps and generates t
 cp .env.example .env                             # backend + database settings
 cp apps/web/.env.example apps/web/.env.local     # web settings
 pnpm db:up                                       # start PostgreSQL (localhost:5433)
+pnpm mail:up                                     # start Mailpit (SMTP :1025, inbox :8025)
 pnpm db:migrate                                  # apply migrations
 pnpm dev                                         # API on :4000, web on :3000
 ```
 
-Open <http://localhost:3000> (it redirects to the dashboard). Phones get a bottom navigation bar,
-tablets an icon rail, and desktops a collapsible sidebar. **Settings → About and diagnostics**
-should show the API as **Online** and the database as **Connected**. The API health endpoints are
+Open <http://localhost:3000> — signed-out visitors land on the sign-in page. Create an account at
+<http://localhost:3000/register>, open the confirmation e-mail in Mailpit at
+<http://localhost:8025>, follow the link, and sign in. Phones get a bottom navigation bar, tablets an
+icon rail, and desktops a collapsible sidebar. **Settings** holds your profile, password, signed-in
+devices, and **About and diagnostics**, which should show the API as **Online** and the database
+as **Connected**. The API health endpoints are
 [`/api/v1/health`](http://localhost:4000/api/v1/health) and
 [`/api/v1/health/ready`](http://localhost:4000/api/v1/health/ready).
 
 ## Scripts
 
-| Script              | Description                                            |
-| ------------------- | ------------------------------------------------------ |
-| `pnpm dev`          | Start the API and the web app together in watch mode.  |
-| `pnpm build`        | Build the API bundle and the Next.js production build. |
-| `pnpm lint`         | Lint the whole workspace (warnings fail).              |
-| `pnpm typecheck`    | Type-check every package.                              |
-| `pnpm test`         | Run all test suites.                                   |
-| `pnpm format`       | Format with Prettier.                                  |
-| `pnpm format:check` | Check formatting.                                      |
-| `pnpm db:up`        | Start local PostgreSQL (Docker).                       |
-| `pnpm db:down`      | Stop local PostgreSQL (data is kept).                  |
-| `pnpm db:generate`  | Generate the Prisma Client.                            |
-| `pnpm db:migrate`   | Create/apply migrations in development.                |
-| `pnpm db:deploy`    | Apply pending migrations (CI/production).              |
-| `pnpm db:studio`    | Open Prisma Studio.                                    |
+| Script                  | Description                                                |
+| ----------------------- | ---------------------------------------------------------- |
+| `pnpm dev`              | Start the API and the web app together in watch mode.      |
+| `pnpm build`            | Build the API bundle and the Next.js production build.     |
+| `pnpm lint`             | Lint the whole workspace (warnings fail).                  |
+| `pnpm typecheck`        | Type-check every package.                                  |
+| `pnpm test`             | Run all unit and component test suites (no database).      |
+| `pnpm test:integration` | Run the API integration tests against `TEST_DATABASE_URL`. |
+| `pnpm format`           | Format with Prettier.                                      |
+| `pnpm format:check`     | Check formatting.                                          |
+| `pnpm db:up`            | Start local PostgreSQL (Docker).                           |
+| `pnpm mail:up`          | Start Mailpit, the local e-mail catcher (Docker).          |
+| `pnpm db:down`          | Stop local services (data is kept).                        |
+| `pnpm db:generate`      | Generate the Prisma Client.                                |
+| `pnpm db:migrate`       | Create/apply migrations in development.                    |
+| `pnpm db:deploy`        | Apply pending migrations (CI/production).                  |
+| `pnpm db:studio`        | Open Prisma Studio.                                        |
 
 ## Documentation
 
@@ -100,6 +109,8 @@ should show the API as **Online** and the database as **Connected**. The API hea
   configuration, technology decisions.
 - [UI architecture](docs/ui-architecture.md) — visual identity, design tokens, the responsive
   shell, components, prototype-data rules, accessibility.
+- [Authentication and security](docs/authentication.md) — sessions, cookies, CSRF, passwords,
+  e-mail tokens, rate limits, deployment model, configuration.
 - [Database design](docs/database-design.md) — model relationships, money representation, balance
   rules, constraints, migrations.
 - [Development guide](docs/development-guide.md) — setup, commands, testing, conventions,

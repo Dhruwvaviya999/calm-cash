@@ -2,7 +2,8 @@
 # Values are read from the repository-root `.env` file (see `.env.example`).
 #
 #   pnpm db:up     # start PostgreSQL and wait until it is healthy
-#   pnpm db:down   # stop it (data is kept in the named volume)
+#   pnpm mail:up   # start Mailpit (local SMTP server + inbox UI) and wait until it is healthy
+#   pnpm db:down   # stop every service (data is kept in the named volume)
 name: calmcash
 
 services:
@@ -25,6 +26,26 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+
+  # Development-only e-mail catcher: the API delivers verification and password-reset messages to
+  # its SMTP port, and nothing ever leaves this machine. Open the inbox at http://localhost:8025.
+  mailpit:
+    image: axllent/mailpit:v1.31.4
+    restart: unless-stopped
+    environment:
+      MP_MAX_MESSAGES: 500
+      # Local catcher without authentication; accept any credentials the API may be configured with.
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+    ports:
+      - '127.0.0.1:${MAILPIT_SMTP_PORT:-1025}:1025'
+      - '127.0.0.1:${MAILPIT_UI_PORT:-8025}:8025'
+    healthcheck:
+      test: ['CMD', '/mailpit', 'readyz']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
 
 volumes:
   postgres-data:

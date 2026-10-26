@@ -97,7 +97,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     href: '/settings',
     label: 'Settings',
     mobileLabel: 'Settings',
-    description: 'Theme, region, and diagnostics',
+    description: 'Profile, security, and appearance',
     icon: Settings,
     group: 'system',
     mobilePlacement: 'more',

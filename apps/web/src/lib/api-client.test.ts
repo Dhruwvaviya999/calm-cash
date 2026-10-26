@@ -1,4 +1,4 @@
-import { healthCheckDtoSchema, REQUEST_ID_HEADER } from '@calmcash/shared';
+import { CSRF_TOKEN_HEADER, healthCheckDtoSchema, REQUEST_ID_HEADER } from '@calmcash/shared';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ApiClientError, createApiClient } from './api-client';
@@ -102,6 +102,14 @@ describe('createApiClient', () => {
     expect(error.code).toBe('NETWORK_ERROR');
   });
 
+  it('sends credentials so the browser attaches the session cookie', async () => {
+    const { client, fetchMock } = clientReturning(jsonResponse({ success: true, data: HEALTH }));
+
+    await client.request('/health', { schema: healthCheckDtoSchema });
+
+    expect(fetchMock.mock.calls[0]?.[1]?.credentials).toBe('include');
+  });
+
   it('re-throws caller-initiated aborts unchanged', async () => {
     const controller = new AbortController();
     controller.abort();
@@ -111,5 +119,110 @@ describe('createApiClient', () => {
     await expect(
       client.request('/health', { schema: healthCheckDtoSchema, signal: controller.signal }),
     ).rejects.toBe(abortError);
+  });
+});
+
+describe('session integration', () => {
+  const TOKEN = 't'.repeat(43);
+  const csrfError = (): Response =>
+    jsonResponse(
+      { success: false, error: { code: 'CSRF_TOKEN_INVALID', message: 'Out of date.' } },
+      403,
+    );
+  const unauthorized = (): Response =>
+    jsonResponse({ success: false, error: { code: 'UNAUTHORIZED', message: 'Signed out.' } }, 401);
+
+  function headersOf(init: RequestInit | undefined): Record<string, string> {
+    const { headers } = init ?? {};
+    return headers !== undefined && !(headers instanceof Headers) && !Array.isArray(headers)
+      ? headers
+      : {};
+  }
+
+  it('attaches the in-memory CSRF token to state-changing requests only', async () => {
+    const fetchMock = vi.fn<typeof fetch>(() =>
+      Promise.resolve(jsonResponse({ success: true, data: HEALTH })),
+    );
+    const client = createApiClient({
+      baseUrl: 'http://api.test',
+      fetch: fetchMock,
+      getCsrfToken: () => TOKEN,
+    });
+
+    await client.request('/health', { schema: healthCheckDtoSchema });
+    await client.request('/health', { schema: healthCheckDtoSchema, method: 'PATCH', body: {} });
+
+    expect(headersOf(fetchMock.mock.calls[0]?.[1])).not.toHaveProperty(CSRF_TOKEN_HEADER);
+    expect(headersOf(fetchMock.mock.calls[1]?.[1])[CSRF_TOKEN_HEADER]).toBe(TOKEN);
+  });
+
+  it('refreshes a rejected CSRF token and retries the request once', async () => {
+    let token = 'stale'.padEnd(43, 's');
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(csrfError())
+      .mockResolvedValueOnce(jsonResponse({ success: true, data: HEALTH }));
+    const refreshCsrfToken = vi.fn(() => {
+      token = TOKEN;
+      return Promise.resolve(true);
+    });
+    const client = createApiClient({
+      baseUrl: 'http://api.test',
+      fetch: fetchMock,
+      getCsrfToken: () => token,
+      refreshCsrfToken,
+    });
+
+    const data = await client.request('/health', {
+      schema: healthCheckDtoSchema,
+      method: 'POST',
+      body: {},
+    });
+
+    expect(data).toEqual(HEALTH);
+    expect(refreshCsrfToken).toHaveBeenCalledOnce();
+    expect(headersOf(fetchMock.mock.calls[1]?.[1])[CSRF_TOKEN_HEADER]).toBe(TOKEN);
+  });
+
+  it('does not retry more than once', async () => {
+    const fetchMock = vi.fn<typeof fetch>(() => Promise.resolve(csrfError()));
+    const client = createApiClient({
+      baseUrl: 'http://api.test',
+      fetch: fetchMock,
+      getCsrfToken: () => TOKEN,
+      refreshCsrfToken: () => Promise.resolve(true),
+    });
+
+    const error = await captureError(
+      client.request('/health', { schema: healthCheckDtoSchema, method: 'POST', body: {} }),
+    );
+
+    expect(error.code).toBe('CSRF_TOKEN_INVALID');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports ended sessions, but not other authentication failures', async () => {
+    const onUnauthorized = vi.fn();
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(unauthorized())
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { success: false, error: { code: 'INVALID_CREDENTIALS', message: 'Wrong password.' } },
+          401,
+        ),
+      );
+    const client = createApiClient({
+      baseUrl: 'http://api.test',
+      fetch: fetchMock,
+      onUnauthorized,
+    });
+
+    await captureError(client.request('/auth/me', { schema: healthCheckDtoSchema }));
+    await captureError(
+      client.request('/auth/login', { schema: healthCheckDtoSchema, method: 'POST', body: {} }),
+    );
+
+    expect(onUnauthorized).toHaveBeenCalledOnce();
   });
 });

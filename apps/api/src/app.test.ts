@@ -2,6 +2,7 @@ import {
   API_V1_PREFIX,
   apiErrorResponseSchema,
   apiSuccessResponseSchema,
+  CSRF_TOKEN_HEADER,
   healthCheckDtoSchema,
   readinessCheckDtoSchema,
   REQUEST_ID_HEADER,
@@ -9,7 +10,12 @@ import {
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 
-import { createTestApp, TEST_ALLOWED_ORIGIN } from './testing/create-test-app';
+import { DEFAULT_AUTH_RATE_LIMITS } from './modules/auth/auth.rate-limits';
+import {
+  createOfflineAuthDependencies,
+  createTestApp,
+  TEST_ALLOWED_ORIGIN,
+} from './testing/create-test-app';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -132,5 +138,91 @@ describe('security middleware', () => {
       .expect(204);
 
     expect(response.get('Access-Control-Allow-Methods')).toContain('POST');
+  });
+
+  it('allows the CSRF header in credentialed cross-origin requests from the web app', async () => {
+    const response = await request(createTestApp())
+      .options(`${API_V1_PREFIX}/auth/profile`)
+      .set('Origin', TEST_ALLOWED_ORIGIN)
+      .set('Access-Control-Request-Method', 'PATCH')
+      .set('Access-Control-Request-Headers', `content-type,${CSRF_TOKEN_HEADER}`)
+      .expect(204);
+
+    expect(response.get('Access-Control-Allow-Headers')).toContain(CSRF_TOKEN_HEADER);
+    expect(response.get('Access-Control-Allow-Credentials')).toBe('true');
+    expect(response.get('Access-Control-Allow-Origin')).toBe(TEST_ALLOWED_ORIGIN);
+  });
+});
+
+describe('request origin verification', () => {
+  it('rejects state-changing requests from disallowed origins with 403 ORIGIN_NOT_ALLOWED', async () => {
+    const app = createTestApp();
+
+    for (const origin of ['https://evil.example', 'null', 'http://localhost:3001']) {
+      const response = await request(app)
+        .post(`${API_V1_PREFIX}/auth/login`)
+        .set('Origin', origin)
+        .send({ email: 'asha@example.com', password: 'whatever' })
+        .expect(403);
+      expect(apiErrorResponseSchema.parse(response.body).error.code).toBe('ORIGIN_NOT_ALLOWED');
+    }
+  });
+
+  it('rejects cross-site browser requests that omit the Origin header', async () => {
+    await request(createTestApp())
+      .post(`${API_V1_PREFIX}/auth/forgot-password`)
+      .set('Sec-Fetch-Site', 'cross-site')
+      .send({ email: 'asha@example.com' })
+      .expect(403);
+  });
+
+  it('lets the web app origin through to validation', async () => {
+    const response = await request(createTestApp())
+      .post(`${API_V1_PREFIX}/auth/login`)
+      .set('Origin', TEST_ALLOWED_ORIGIN)
+      .send({ email: 'not-an-email' })
+      .expect(400);
+
+    expect(apiErrorResponseSchema.parse(response.body).error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('never applies to safe methods', async () => {
+    await request(createTestApp())
+      .get(`${API_V1_PREFIX}/health`)
+      .set('Origin', 'https://evil.example')
+      .expect(200);
+  });
+});
+
+describe('authentication boundary (no database)', () => {
+  it('rejects protected requests without a session cookie before any lookup', async () => {
+    const response = await request(createTestApp())
+      .patch(`${API_V1_PREFIX}/auth/profile`)
+      .set('Origin', TEST_ALLOWED_ORIGIN)
+      .send({ name: 'Mallory' })
+      .expect(401);
+
+    expect(apiErrorResponseSchema.parse(response.body).error.code).toBe('UNAUTHORIZED');
+    expect(response.get('Cache-Control')).toBe('no-store');
+  });
+
+  it('rate-limits repeated failed sign-ins from one client', async () => {
+    const app = createTestApp({
+      auth: createOfflineAuthDependencies({
+        rateLimits: {
+          ...DEFAULT_AUTH_RATE_LIMITS,
+          loginPerIp: { limit: 2, windowMs: 60_000 },
+        },
+      }),
+    });
+    const attempt = (): request.Test =>
+      request(app).post(`${API_V1_PREFIX}/auth/login`).set('Origin', TEST_ALLOWED_ORIGIN).send({});
+
+    await attempt().expect(400);
+    await attempt().expect(400);
+    const limited = await attempt().expect(429);
+
+    expect(apiErrorResponseSchema.parse(limited.body).error.code).toBe('RATE_LIMITED');
+    expect(limited.get('RateLimit-Policy')).toBeDefined();
   });
 });

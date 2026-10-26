@@ -3,7 +3,7 @@
 PostgreSQL is the system of record. The schema is defined in
 [`prisma/schema.prisma`](../prisma/schema.prisma); the authoritative DDL — including the CHECK
 constraints Prisma cannot express — is in [`prisma/migrations/`](../prisma/migrations/).
-This document covers the Phase 1 core models.
+This document covers the Phase 1 core models and the Phase 3 authentication models.
 
 ## 1. Entity relationships
 
@@ -13,6 +13,8 @@ erDiagram
     users ||--o{ categories : owns
     users ||--o{ transactions : owns
     users ||--o{ budgets : owns
+    users ||--o{ sessions : "signs in with"
+    users ||--o{ auth_tokens : "is e-mailed"
     accounts ||--o{ transactions : "source (account_id)"
     accounts ||--o{ transactions : "destination (transfer_account_id)"
     categories |o--o{ transactions : classifies
@@ -22,8 +24,28 @@ erDiagram
         uuid id PK
         varchar name
         varchar email UK "lower-case"
+        varchar password_hash "Argon2id, nullable"
+        timestamptz email_verified_at "nullable"
         char preferred_currency
         varchar timezone "IANA"
+    }
+    sessions {
+        uuid id PK
+        uuid user_id FK
+        char token_hash UK "SHA-256 hex"
+        char csrf_token_hash "SHA-256 hex"
+        varchar device_label "nullable"
+        timestamptz last_active_at
+        timestamptz expires_at
+        timestamptz revoked_at "nullable"
+    }
+    auth_tokens {
+        uuid id PK
+        uuid user_id FK
+        auth_token_purpose purpose
+        char token_hash UK "SHA-256 hex"
+        timestamptz expires_at
+        timestamptz consumed_at "nullable"
     }
     accounts {
         uuid id PK
@@ -68,13 +90,15 @@ erDiagram
 
 Every table also has `created_at` and `updated_at` (`timestamptz(3)`).
 
-| Model         | Purpose                                                                                        |
-| ------------- | ---------------------------------------------------------------------------------------------- |
-| `User`        | Owner of all data. Preferred currency and IANA time zone drive defaults and reporting.         |
-| `Account`     | A place money lives: bank account, cash, card, wallet, investment, or loan.                    |
-| `Category`    | User-defined income or expense label. Added in Phase 1 so `categoryId` has a real foreign key. |
-| `Transaction` | One income, expense, or transfer event.                                                        |
-| `Budget`      | A spending limit per period, for one category or all expenses.                                 |
+| Model         | Purpose                                                                                         |
+| ------------- | ----------------------------------------------------------------------------------------------- |
+| `User`        | Owner of all data. Preferred currency and IANA time zone drive defaults and reporting.          |
+| `Account`     | A place money lives: bank account, cash, card, wallet, investment, or loan.                     |
+| `Category`    | User-defined income or expense label. Added in Phase 1 so `categoryId` has a real foreign key.  |
+| `Transaction` | One income, expense, or transfer event.                                                         |
+| `Budget`      | A spending limit per period, for one category or all expenses.                                  |
+| `Session`     | A browser session: hashed cookie token, hashed CSRF token, lifetime, revocation (Phase 3).      |
+| `AuthToken`   | A single-use e-mailed token for e-mail verification or password reset, stored hashed (Phase 3). |
 
 ### Refinements to the initial contracts
 
@@ -156,19 +180,25 @@ Later phases extend the model without changing the rule:
 
 ### Constraints
 
-| Table          | Constraint                                                 | Rule                                                                           |
-| -------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `users`        | `users_email_key` (unique)                                 | One account per e-mail address.                                                |
-| `users`        | `users_email_lowercase_check`                              | E-mail stored lower-case, so uniqueness is case-insensitive.                   |
-| `accounts`     | `accounts_user_id_name_key` (unique)                       | Account names are unique per user.                                             |
-| `categories`   | `categories_user_id_kind_name_key` (unique)                | Category names are unique per user and kind.                                   |
-| `transactions` | `transactions_amount_minor_positive_check`                 | `amount_minor > 0`.                                                            |
-| `transactions` | `transactions_transfer_shape_check`                        | Transfers: destination present, ≠ source, no category. Others: no destination. |
-| `budgets`      | `budgets_limit_minor_positive_check`                       | `limit_minor > 0`.                                                             |
-| `budgets`      | `budgets_date_range_check`                                 | `end_date` is null or ≥ `start_date`.                                          |
-| `budgets`      | `budgets_custom_period_end_date_check`                     | `custom` periods require an `end_date`.                                        |
-| all            | `*_currency_format_check`                                  | `currency ~ '^[A-Z]{3}$'`.                                                     |
-| all            | `*_name_not_blank_check` / `*_description_not_blank_check` | Text identifiers cannot be blank.                                              |
+| Table          | Constraint                                                             | Rule                                                                           |
+| -------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `users`        | `users_email_key` (unique)                                             | One account per e-mail address.                                                |
+| `users`        | `users_email_lowercase_check`                                          | E-mail stored lower-case, so uniqueness is case-insensitive.                   |
+| `users`        | `users_password_hash_format_check`                                     | A stored password is always an Argon2id PHC string.                            |
+| `sessions`     | `sessions_token_hash_key` (unique)                                     | One session per token hash.                                                    |
+| `sessions`     | `sessions_*_hash_format_check`                                         | Token and CSRF hashes are 64 lower-case hex characters.                        |
+| `sessions`     | `sessions_expiry_after_creation_check`                                 | `expires_at > created_at`.                                                     |
+| `auth_tokens`  | `auth_tokens_token_hash_key` (unique)                                  | One token per hash; looked up by hash on consumption.                          |
+| `auth_tokens`  | `auth_tokens_token_hash_format_check`, `…_expiry_after_creation_check` | Hex digest; coherent lifetime.                                                 |
+| `accounts`     | `accounts_user_id_name_key` (unique)                                   | Account names are unique per user.                                             |
+| `categories`   | `categories_user_id_kind_name_key` (unique)                            | Category names are unique per user and kind.                                   |
+| `transactions` | `transactions_amount_minor_positive_check`                             | `amount_minor > 0`.                                                            |
+| `transactions` | `transactions_transfer_shape_check`                                    | Transfers: destination present, ≠ source, no category. Others: no destination. |
+| `budgets`      | `budgets_limit_minor_positive_check`                                   | `limit_minor > 0`.                                                             |
+| `budgets`      | `budgets_date_range_check`                                             | `end_date` is null or ≥ `start_date`.                                          |
+| `budgets`      | `budgets_custom_period_end_date_check`                                 | `custom` periods require an `end_date`.                                        |
+| all            | `*_currency_format_check`                                              | `currency ~ '^[A-Z]{3}$'`.                                                     |
+| all            | `*_name_not_blank_check` / `*_description_not_blank_check`             | Text identifiers cannot be blank.                                              |
 
 These rules are also validated earlier, at the API edge with Zod. The database copy is the last
 line of defence against a buggy code path or a manual query.
@@ -204,28 +234,32 @@ database level later if needed.
   user's `timezone`.
 - **Indexes:**
 
-  | Index                                         | Serves                                               |
-  | --------------------------------------------- | ---------------------------------------------------- |
-  | `transactions (user_id, occurred_at DESC)`    | A user's timeline, newest first; date-range reports. |
-  | `transactions (account_id, occurred_at DESC)` | An account ledger; balance calculation.              |
-  | `transactions (transfer_account_id)`          | Incoming transfers for an account's balance.         |
-  | `transactions (category_id)`                  | Category reports and `ON DELETE SET NULL`.           |
-  | `budgets (user_id)`, `budgets (category_id)`  | A user's budgets; FK checks.                         |
-  | unique `accounts (user_id, name)`             | Also serves "accounts of a user".                    |
-  | unique `categories (user_id, kind, name)`     | Also serves "categories of a user".                  |
+  | Index                                               | Serves                                               |
+  | --------------------------------------------------- | ---------------------------------------------------- |
+  | `transactions (user_id, occurred_at DESC)`          | A user's timeline, newest first; date-range reports. |
+  | `transactions (account_id, occurred_at DESC)`       | An account ledger; balance calculation.              |
+  | `transactions (transfer_account_id)`                | Incoming transfers for an account's balance.         |
+  | `transactions (category_id)`                        | Category reports and `ON DELETE SET NULL`.           |
+  | `budgets (user_id)`, `budgets (category_id)`        | A user's budgets; FK checks.                         |
+  | `sessions (user_id)`                                | A user's sessions (list, revoke others).             |
+  | `sessions (expires_at)`, `auth_tokens (expires_at)` | Cleanup of ended records.                            |
+  | `auth_tokens (user_id, purpose)`                    | Replacing a user's outstanding tokens.               |
+  | unique `accounts (user_id, name)`                   | Also serves "accounts of a user".                    |
+  | unique `categories (user_id, kind, name)`           | Also serves "categories of a user".                  |
 
 ## 6. Database models vs. API DTOs
 
 Prisma models are internal to the API. Responses always go through a mapper into a shared DTO:
 
-| Database (Prisma)                                       | API DTO (`@calmcash/shared`)               |
-| ------------------------------------------------------- | ------------------------------------------ |
-| `bigint` money columns                                  | `MinorUnitsString` (`serializeMinorUnits`) |
-| `Date` (`timestamptz`)                                  | `IsoDateTimeString` (`toISOString()`)      |
-| `Date` (`date`)                                         | `IsoDateString` (`YYYY-MM-DD`)             |
-| `null` optional column                                  | Property omitted                           |
-| Enum values                                             | Identical literals (asserted by a test)    |
-| Internal or sensitive columns (e.g. future credentials) | Never present                              |
+| Database (Prisma)                         | API DTO (`@calmcash/shared`)                |
+| ----------------------------------------- | ------------------------------------------- |
+| `bigint` money columns                    | `MinorUnitsString` (`serializeMinorUnits`)  |
+| `Date` (`timestamptz`)                    | `IsoDateTimeString` (`toISOString()`)       |
+| `Date` (`date`)                           | `IsoDateString` (`YYYY-MM-DD`)              |
+| `null` optional column                    | Property omitted                            |
+| Enum values                               | Identical literals (asserted by a test)     |
+| `password_hash`, session and token hashes | Never present                               |
+| `email_verified_at`                       | `emailVerifiedAt` (absent while unverified) |
 
 `apps/api/src/lib/domain-enums.test.ts` asserts that the generated Prisma enums and the shared
 literal unions are identical, both at runtime and at the type level.
@@ -240,6 +274,9 @@ literal unions are identical, both at runtime and at the type level.
 - **Never edit an applied migration.** Add a new migration instead.
 - **Production:** `pnpm db:deploy` (`prisma migrate deploy`) applies pending migrations without
   prompting and never resets data.
+- **Phase 3 migration** (`20261026041933_add_authentication`) is purely additive: two nullable
+  `users` columns, the `sessions` and `auth_tokens` tables, and CHECK constraints. Existing users and
+  financial data are untouched; a user without a password sets one through password reset.
 - **Check for drift:**
   `pnpm exec prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code`
   exits with 0 when the database matches the schema.

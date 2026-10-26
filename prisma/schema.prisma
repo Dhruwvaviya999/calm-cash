@@ -56,24 +56,86 @@ enum BudgetPeriod {
   @@map("budget_period")
 }
 
+/// What a single-use e-mail token proves when it is consumed.
+enum AuthTokenPurpose {
+  email_verification
+  password_reset
+
+  @@map("auth_token_purpose")
+}
+
 model User {
-  id                String   @id @default(uuid(7)) @db.Uuid
-  name              String   @db.VarChar(100)
+  id                String    @id @default(uuid(7)) @db.Uuid
+  name              String    @db.VarChar(100)
   /// Normalised to lower case before persistence (enforced by a CHECK constraint).
-  email             String   @unique @db.VarChar(254)
+  email             String    @unique @db.VarChar(254)
+  /// Argon2id PHC string. Null for users created before authentication existed: they cannot sign
+  /// in until a password is set through the password-reset flow. Never leaves the API.
+  passwordHash      String?   @map("password_hash") @db.VarChar(255)
+  /// When the user proved ownership of `email`. Unverified users cannot sign in.
+  emailVerifiedAt   DateTime? @map("email_verified_at") @db.Timestamptz(3)
   /// ISO 4217 code used as the default for new accounts and reports.
-  preferredCurrency String   @map("preferred_currency") @db.Char(3)
+  preferredCurrency String    @map("preferred_currency") @db.Char(3)
   /// IANA time zone identifier (e.g. "Asia/Kolkata") used for date-based reporting.
-  timezone          String   @db.VarChar(64)
-  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  timezone          String    @db.VarChar(64)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   accounts     Account[]
   categories   Category[]
   transactions Transaction[]
   budgets      Budget[]
+  sessions     Session[]
+  authTokens   AuthToken[]
 
   @@map("users")
+}
+
+/// A server-side browser session. The cookie carries a random token; only its SHA-256 hash is
+/// stored, so a database leak cannot be replayed as a cookie.
+model Session {
+  id            String    @id @default(uuid(7)) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  /// Hex SHA-256 of the session token held in the cookie.
+  tokenHash     String    @unique @map("token_hash") @db.Char(64)
+  /// Hex SHA-256 of the CSRF token bound to this session.
+  csrfTokenHash String    @map("csrf_token_hash") @db.Char(64)
+  /// Coarse, non-identifying description such as "Chrome on Windows". No IP addresses are kept.
+  deviceLabel   String?   @map("device_label") @db.VarChar(100)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  /// Updated at most every few minutes; drives the idle timeout.
+  lastActiveAt  DateTime  @map("last_active_at") @db.Timestamptz(3)
+  /// Absolute end of the session, regardless of activity.
+  expiresAt     DateTime  @map("expires_at") @db.Timestamptz(3)
+  /// Set on logout, explicit revocation, password change, or password reset.
+  revokedAt     DateTime? @map("revoked_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+/// Single-use token sent by e-mail (verification or password reset). Only its hash is stored.
+model AuthToken {
+  id         String           @id @default(uuid(7)) @db.Uuid
+  userId     String           @map("user_id") @db.Uuid
+  purpose    AuthTokenPurpose
+  /// Hex SHA-256 of the token in the e-mailed link.
+  tokenHash  String           @unique @map("token_hash") @db.Char(64)
+  expiresAt  DateTime         @map("expires_at") @db.Timestamptz(3)
+  /// Set atomically when the token is used; a consumed token can never be used again.
+  consumedAt DateTime?        @map("consumed_at") @db.Timestamptz(3)
+  createdAt  DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose])
+  @@index([expiresAt])
+  @@map("auth_tokens")
 }
 
 model Account {

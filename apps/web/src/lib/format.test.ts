@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   formatDate,
+  formatDateTime,
   formatMoney,
   formatMoneyMagnitude,
   MINUS_SIGN,
@@ -68,5 +69,13 @@ describe('formatDate', () => {
   it('keeps calendar dates on the same day', () => {
     expect(formatDate('2026-10-01', 'monthYear')).toBe('October 2026');
     expect(formatDate('2026-10-01')).toBe('1 Oct');
+  });
+});
+
+describe('formatDateTime', () => {
+  it('formats an instant in the requested time zone', () => {
+    const instant = '2026-10-24T20:30:00.000Z';
+    expect(formatDateTime(instant)).toBe('25 Oct 2026, 2:00 am');
+    expect(formatDateTime(instant, 'America/New_York')).toBe('24 Oct 2026, 4:30 pm');
   });
 });

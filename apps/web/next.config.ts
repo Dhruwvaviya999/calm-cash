@@ -12,6 +12,15 @@ const nextConfig: NextConfig = {
   redirects() {
     return Promise.resolve([{ source: '/', destination: '/dashboard', permanent: false }]);
   },
+  // E-mailed links put a one-time token in the URL of these pages; never leak it in a Referer.
+  headers() {
+    return Promise.resolve(
+      ['/reset-password', '/verify-email'].map((source) => ({
+        source,
+        headers: [{ key: 'Referrer-Policy', value: 'no-referrer' }],
+      })),
+    );
+  },
   turbopack: {
     rules: {
       // Tailwind CSS v4 runs as a Turbopack loader (no PostCSS config file required).

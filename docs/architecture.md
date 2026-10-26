@@ -1,7 +1,8 @@
 # CalmCash architecture
 
 This document describes how the CalmCash codebase is organised, how its parts communicate, and the
-rules that keep features decoupled as the product grows. It reflects the Phase 1 foundation.
+rules that keep features decoupled as the product grows. It reflects the Phase 1 foundation and the
+Phase 3 authentication layer (detailed in [authentication.md](./authentication.md)).
 
 ## 1. Overview
 
@@ -28,7 +29,7 @@ CalmCash is a pnpm monorepo with two deployable applications and one shared libr
 | `packages/shared`   | Isomorphic contracts used by both apps: DTO types, Zod schemas, constants, money. |
 | `prisma/`           | Database schema and versioned SQL migrations.                                     |
 | `prisma.config.ts`  | Prisma CLI configuration (schema path, migrations path, connection URL).          |
-| `compose.yaml`      | Local PostgreSQL for development.                                                 |
+| `compose.yaml`      | Local PostgreSQL and the Mailpit e-mail catcher for development.                  |
 | `eslint.config.mjs` | One lint configuration for the whole workspace.                                   |
 
 ## 2. Repository layout
@@ -39,9 +40,10 @@ apps/
     app.ts                 Express app factory (no network binding — testable in-process)
     server.ts              Process entry: env validation, dependency wiring, listen, shutdown
     config/env.ts          Typed, validated runtime configuration
-    lib/                   Cross-cutting infrastructure (errors, logging, DB client, shutdown, …)
-    middleware/            Request logging, validation convention, 404, error handler
-    modules/<feature>/     Feature modules (routes → controller → service → repository)
+    lib/                   Cross-cutting infrastructure (errors, logging, DB client, e-mail, background tasks, shutdown, …)
+    middleware/            Request logging, origin check, validation convention, 404, error handler
+    modules/<feature>/     Feature modules (routes → controller → service → repository): health, auth
+    testing/               Test app factories, in-memory e-mail, integration-database harness
     routes/v1.ts           Composition root of API v1: mounts every module router
     generated/prisma/      Generated Prisma Client (git-ignored; `pnpm db:generate`)
   web/src/
@@ -51,6 +53,7 @@ apps/
       ui/                  shadcn/ui primitives (owned source)
       brand/ layout/ theme/ feedback/ finance/ forms/
     fixtures/              Prototype-only sample data (never imported by shared code)
+    testing/               Test setup and helpers (auth context values)
     hooks/                 Reusable React hooks
     lib/                   Infrastructure: env, API client, navigation, formatting, preferences
     services/              One module per API resource; returns validated shared DTOs
@@ -113,8 +116,11 @@ Always import from the package root (`import { … } from '@calmcash/shared'`); 
 - **Errors:** the client throws only `ApiClientError`, carrying the API's `code`, HTTP status,
   field `details`, and `requestId`. Client-side failures use `NETWORK_ERROR` and `INVALID_RESPONSE`.
   Caller-initiated aborts are re-thrown unchanged.
-- **CORS:** the API accepts browser requests only from `CORS_ORIGINS`. Credentials are allowed so
-  cookie-based sessions can be introduced later without changing the transport.
+- **CORS and sessions:** the API accepts browser requests only from `CORS_ORIGINS`, with credentials.
+  The client sends `credentials: 'include'`, so the browser attaches the HttpOnly session cookie, and
+  adds the in-memory CSRF token as `x-csrf-token` on state-changing requests. A `401 UNAUTHORIZED`
+  ends the client-side session; a `403 CSRF_TOKEN_INVALID` refreshes the token and retries once. See
+  [authentication.md](./authentication.md).
 - **Request IDs:** the API assigns (or accepts a well-formed) `x-request-id`, returns it as a
   header, includes it in error bodies, and logs it — users can quote it in bug reports.
 
@@ -125,10 +131,12 @@ Middleware order (`apps/api/src/app.ts`):
 1. **Request logger** (`pino-http`) — assigns the request ID, logs one line per request.
 2. **Helmet** — security headers.
 3. **CORS** — explicit origin allow-list.
-4. **JSON body parser** — size-limited by `JSON_BODY_LIMIT`; only `application/json`.
-5. **`/api/v1` router** — module routers.
-6. **Not-found handler** — typed 404 envelope.
-7. **Error handler** — converts every error into the error envelope.
+4. **Origin check** — rejects state-changing requests from other sites (`403 ORIGIN_NOT_ALLOWED`).
+5. **JSON body parser** — size-limited by `JSON_BODY_LIMIT`; only `application/json`.
+6. **`/api/v1` router** — module routers. Protected auth routes add `requireSession`, `requireCsrf`,
+   and rate limiters per route.
+7. **Not-found handler** — typed 404 envelope.
+8. **Error handler** — converts every error into the error envelope.
 
 Each feature is a self-contained module under `apps/api/src/modules/<feature>/`:
 
@@ -203,21 +211,30 @@ fallback). Error boundaries receive `error: unknown` and narrow it before readin
 
 ## 8. Environment configuration
 
-| Variable              | Used by          | Purpose                                    | Default       |
-| --------------------- | ---------------- | ------------------------------------------ | ------------- |
-| `POSTGRES_USER`       | Docker Compose   | Local database user                        | —             |
-| `POSTGRES_PASSWORD`   | Docker Compose   | Local database password                    | —             |
-| `POSTGRES_DB`         | Docker Compose   | Local database name                        | —             |
-| `POSTGRES_PORT`       | Docker Compose   | Host port of the container (loopback only) | `5433`        |
-| `DATABASE_URL`        | Prisma CLI, API  | PostgreSQL connection URL                  | — (required)  |
-| `NODE_ENV`            | API              | `development` \| `test` \| `production`    | `development` |
-| `API_HOST`            | API              | Bind address                               | `localhost`   |
-| `API_PORT`            | API              | Port                                       | `4000`        |
-| `CORS_ORIGINS`        | API              | Comma-separated browser origins            | — (required)  |
-| `JSON_BODY_LIMIT`     | API              | Max JSON body size                         | `100kb`       |
-| `LOG_LEVEL`           | API              | pino level                                 | `info`        |
-| `SHUTDOWN_TIMEOUT_MS` | API              | Grace period for in-flight requests        | `10000`       |
-| `NEXT_PUBLIC_API_URL` | Web (build time) | API origin, without `/api/v1`              | — (required)  |
+| Variable                                | Used by           | Purpose                                    | Default                      |
+| --------------------------------------- | ----------------- | ------------------------------------------ | ---------------------------- |
+| `POSTGRES_USER`                         | Docker Compose    | Local database user                        | —                            |
+| `POSTGRES_PASSWORD`                     | Docker Compose    | Local database password                    | —                            |
+| `POSTGRES_DB`                           | Docker Compose    | Local database name                        | —                            |
+| `POSTGRES_PORT`                         | Docker Compose    | Host port of the container (loopback only) | `5433`                       |
+| `DATABASE_URL`                          | Prisma CLI, API   | PostgreSQL connection URL                  | — (required)                 |
+| `NODE_ENV`                              | API               | `development` \| `test` \| `production`    | `development`                |
+| `API_HOST`                              | API               | Bind address                               | `localhost`                  |
+| `API_PORT`                              | API               | Port                                       | `4000`                       |
+| `CORS_ORIGINS`                          | API               | Comma-separated browser origins            | — (required)                 |
+| `JSON_BODY_LIMIT`                       | API               | Max JSON body size                         | `100kb`                      |
+| `LOG_LEVEL`                             | API               | pino level                                 | `info`                       |
+| `SHUTDOWN_TIMEOUT_MS`                   | API               | Grace period for in-flight requests        | `10000`                      |
+| `WEB_APP_URL`                           | API               | Web origin used in e-mailed links          | 1st CORS origin              |
+| `TRUST_PROXY_HOPS`                      | API               | Trusted reverse proxies (client IPs)       | `0`                          |
+| `SESSION_MAX_AGE_DAYS`                  | API               | Absolute session lifetime                  | `14`                         |
+| `SESSION_IDLE_TIMEOUT_HOURS`            | API               | Idle timeout of a session                  | `72`                         |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE` | API               | SMTP server (Mailpit locally)              | `localhost`, `1025`, `false` |
+| `SMTP_USER`, `SMTP_PASSWORD`            | API               | SMTP credentials (both or neither)         | none                         |
+| `EMAIL_FROM`                            | API               | Sender of transactional e-mail             | local placeholder            |
+| `MAILPIT_SMTP_PORT`, `MAILPIT_UI_PORT`  | Docker Compose    | Mailpit host ports                         | `1025`, `8025`               |
+| `TEST_DATABASE_URL`                     | Integration tests | Disposable `*_test` database               | — (tests only)               |
+| `NEXT_PUBLIC_API_URL`                   | Web (build time)  | API origin, without `/api/v1`              | — (required)                 |
 
 - Backend and database variables live in the repository-root `.env` (template: `.env.example`).
   The API loads it with Node's `--env-file-if-exists`; `prisma.config.ts` loads it with
@@ -234,13 +251,18 @@ fallback). Error boundaries receive `error: unknown` and narrow it before readin
 - **Logging:** structured JSON via pino. Request logs contain method, URL, status, duration, and
   request ID — headers are not logged, and `authorization`/`cookie` are redacted as a safeguard.
   Health probes are excluded from request logging.
-- **Security baseline:** Helmet headers, explicit CORS allow-list, JSON-only body parsing with a
-  size limit, no `X-Powered-By`, PostgreSQL bound to `127.0.0.1` in development.
+- **Security baseline:** Helmet headers, explicit CORS allow-list, origin verification, JSON-only
+  body parsing with a size limit, no `X-Powered-By`, PostgreSQL and Mailpit bound to `127.0.0.1` in
+  development. Authentication adds hashed server-side sessions, HttpOnly `SameSite=Strict` cookies,
+  synchronizer CSRF tokens, Argon2id, and rate limits ([authentication.md](./authentication.md)).
 - **Health:** `GET /api/v1/health` (liveness, no dependencies) and `GET /api/v1/health/ready`
   (readiness, checks PostgreSQL; 503 when unavailable). Both send `Cache-Control: no-store`.
+- **Housekeeping:** an hourly job deletes sessions and tokens that have been unusable for a week.
+  E-mails that must not shape a response (password reset, resend) run as background tasks.
 - **Graceful shutdown** (`lib/shutdown.ts`): on SIGINT/SIGTERM the server stops accepting
   connections, closes idle keep-alive sockets, waits for in-flight requests (bounded by
-  `SHUTDOWN_TIMEOUT_MS`), disconnects Prisma, then exits. Uncaught exceptions and unhandled
+  `SHUTDOWN_TIMEOUT_MS`), stops the cleanup job, waits for background e-mails, closes SMTP,
+  disconnects Prisma, then exits. Uncaught exceptions and unhandled
   rejections trigger the same sequence with exit code 1.
 
 ## 10. Adding a feature without coupling
@@ -271,22 +293,28 @@ Rules that keep modules independent:
 
 ## 11. Technology decisions
 
-| Decision                                      | Rationale                                                                                              |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| TypeScript 6.0                                | Latest JS-API release. TS 7 (native) is not yet supported by `typescript-eslint` (`<6.1`).             |
-| ESLint 9.39                                   | `eslint-config-next` 16.4 and its React/import/a11y plugins target ESLint 9; v10 is not yet supported. |
-| Prisma 7.10 (stable)                          | npm's `latest` tag currently points at an 8.0 release candidate; prereleases are avoided.              |
-| Prisma `prisma-client` + `@prisma/adapter-pg` | Rust-free client generated as TypeScript, bundle-friendly, pg connection pooling.                      |
-| Express 5                                     | Native async error propagation; stable.                                                                |
-| Next.js 16 + Turbopack                        | Default bundler; Tailwind CSS v4 runs as a Turbopack loader (`@tailwindcss/turbopack`).                |
-| `node --watch --import tsx` for API dev       | Node's built-in watcher works reliably under `pnpm --parallel`; tsx's own watcher did not on Windows.  |
-| Shared package as TypeScript source           | No stale build output; one strict type-check; bundled into the API by tsup.                            |
-| PostgreSQL 18 (Docker)                        | Current stable major; port 5433 avoids clashing with a native install.                                 |
-| Money as BIGINT minor units                   | Exact integer arithmetic; serialised as strings in JSON. See the database design.                      |
-| shadcn/ui primitives (new-york, Radix)        | Accessible, owned component source; restyled through CalmCash tokens.                                  |
-| `clsx` + `tailwind-merge` for `cn`            | Stable, established helper; the shadcn v4 CLI's `cn` package is pre-1.0.                               |
-| Custom theme/sidebar preference store         | Pre-paint inline script per the Next.js guide; avoids `next-themes`' client-rendered script warning.   |
-| Geist via the `geist` package                 | Fonts bundled from npm with `next/font/local`; builds never fetch fonts.                               |
+| Decision                                      | Rationale                                                                                               |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| TypeScript 6.0                                | Latest JS-API release. TS 7 (native) is not yet supported by `typescript-eslint` (`<6.1`).              |
+| ESLint 9.39                                   | `eslint-config-next` 16.4 and its React/import/a11y plugins target ESLint 9; v10 is not yet supported.  |
+| Prisma 7.10 (stable)                          | npm's `latest` tag currently points at an 8.0 release candidate; prereleases are avoided.               |
+| Prisma `prisma-client` + `@prisma/adapter-pg` | Rust-free client generated as TypeScript, bundle-friendly, pg connection pooling.                       |
+| Express 5                                     | Native async error propagation; stable.                                                                 |
+| Next.js 16 + Turbopack                        | Default bundler; Tailwind CSS v4 runs as a Turbopack loader (`@tailwindcss/turbopack`).                 |
+| `node --watch --import tsx` for API dev       | Node's built-in watcher works reliably under `pnpm --parallel`; tsx's own watcher did not on Windows.   |
+| Shared package as TypeScript source           | No stale build output; one strict type-check; bundled into the API by tsup.                             |
+| PostgreSQL 18 (Docker)                        | Current stable major; port 5433 avoids clashing with a native install.                                  |
+| Money as BIGINT minor units                   | Exact integer arithmetic; serialised as strings in JSON. See the database design.                       |
+| shadcn/ui primitives (new-york, Radix)        | Accessible, owned component source; restyled through CalmCash tokens.                                   |
+| `clsx` + `tailwind-merge` for `cn`            | Stable, established helper; the shadcn v4 CLI's `cn` package is pre-1.0.                                |
+| Custom theme/sidebar preference store         | Pre-paint inline script per the Next.js guide; avoids `next-themes`' client-rendered script warning.    |
+| Geist via the `geist` package                 | Fonts bundled from npm with `next/font/local`; builds never fetch fonts.                                |
+| Opaque sessions in PostgreSQL (no JWT)        | Instant revocation, server-side expiry, nothing secret readable by scripts; one database round trip.    |
+| `argon2` (node-argon2) for Argon2id           | Reference C implementation with bundled N-API prebuilds (`allowBuilds` only compiles as a fallback).    |
+| HMAC-derived CSRF token, hash stored          | Synchronizer token bound to the session that survives page reloads without storing it in clear.         |
+| `express-rate-limit` (memory store)           | Maintained, typed, standard headers; swap the store for Redis before running several instances.         |
+| nodemailer (`~10.0`) + Mailpit                | Provider-neutral SMTP behind a small `EmailService` interface; Mailpit keeps local mail on the machine. |
+| Testing Library + jsdom (per-file opt-in)     | Real interaction tests for forms and guards; static-markup tests stay in plain Node.                    |
 
 ## 12. Prepared for later phases
 
@@ -295,6 +323,6 @@ Rules that keep modules independent:
   take typed props, so later phases replace fixtures with API data without touching the shell.
 - **PWA:** `metadata`, `viewport.themeColor`, safe-area padding, and an app icon are in place;
   a web manifest (`app/manifest.ts`) and service worker are deliberately left for the PWA phase.
-- **Authentication:** CORS already permits credentials and the `Authorization` header; credential
-  headers are redacted from logs; DTOs are separate from database models, so credential columns
-  added later can never be serialised by accident.
+- **Authentication (Phase 3, done):** see [authentication.md](./authentication.md). Future modules
+  get the caller only through `getAuthContext(req)` after `requireSession` (and `requireCsrf` for
+  mutations) and must scope every query by that user ID.

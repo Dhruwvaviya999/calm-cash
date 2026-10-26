@@ -2,9 +2,14 @@ import { API_V1_PREFIX } from '@calmcash/shared';
 
 import { createApp } from './app';
 import { parseEnv } from './config/env';
+import { createBackgroundTasks } from './lib/background-tasks';
 import { createDatabaseHealthCheck, createPrismaClient } from './lib/database';
+import { createSmtpEmailService } from './lib/email';
 import { createLogger } from './lib/logger';
 import { registerGracefulShutdown } from './lib/shutdown';
+import { createPrismaAuthRepository } from './modules/auth/auth.repository';
+import { createArgon2PasswordHasher } from './modules/auth/password-hasher';
+import { scheduleSessionCleanup } from './modules/auth/session-cleanup';
 
 // Process entry point: validate configuration, wire dependencies, bind the port.
 // All application behaviour lives in `createApp` so it can be tested without a network socket.
@@ -26,11 +31,26 @@ if (!env.success) {
 const { config } = env;
 const logger = createLogger(config);
 const prisma = createPrismaClient(config.databaseUrl, logger);
+const emailService = createSmtpEmailService(config.email, logger);
+const backgroundTasks = createBackgroundTasks(logger);
+const authRepository = createPrismaAuthRepository(prisma);
 
 const app = createApp({
   config,
   logger,
   checkDatabase: createDatabaseHealthCheck(prisma, logger),
+  auth: {
+    repository: authRepository,
+    passwordHasher: createArgon2PasswordHasher(),
+    emailService,
+    backgroundTasks,
+  },
+});
+
+const stopSessionCleanup = scheduleSessionCleanup({
+  repository: authRepository,
+  session: config.session,
+  logger,
 });
 
 const server = app.listen(config.port, config.host, (error) => {
@@ -43,11 +63,22 @@ const server = app.listen(config.port, config.host, (error) => {
     { url: `http://${config.host}:${config.port}${API_V1_PREFIX}` },
     'CalmCash API listening',
   );
+  // Sign-up and password recovery need e-mail; say so early instead of at the first sign-up.
+  void emailService.verifyConnection().then((reachable) => {
+    if (reachable) {
+      logger.info({ host: config.email.smtp.host }, 'SMTP server reachable');
+    }
+  });
 });
 
 registerGracefulShutdown({
   server,
   logger,
   timeoutMs: config.shutdownTimeoutMs,
-  cleanup: () => prisma.$disconnect(),
+  cleanup: async () => {
+    stopSessionCleanup();
+    await backgroundTasks.drain();
+    emailService.close();
+    await prisma.$disconnect();
+  },
 });

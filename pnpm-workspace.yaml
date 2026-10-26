@@ -5,6 +5,7 @@ packages:
 # Dependencies allowed to run install scripts (pnpm blocks all others by default).
 allowBuilds:
   '@prisma/engines': true # downloads the Prisma schema engine used by `prisma migrate`
+  argon2: true # password hashing; loads a bundled N-API prebuild, compiles only where none exists
   esbuild: true # verifies the platform-specific esbuild binary (tsx, tsup, vite)
   prisma: true
   unrs-resolver: false # prebuilt binary works without its postinstall (matches create-next-app)

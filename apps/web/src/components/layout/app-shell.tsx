@@ -7,8 +7,15 @@ import { MobileBottomNav } from './mobile-bottom-nav';
 /**
  * Layout shared by every in-app page. A Server Component: only the navigation pieces that need
  * the current route or user input are Client Components, and page content stays server-rendered.
+ * `accountMenu` fills the header's account slot (the signed-in user's menu).
  */
-export function AppShell({ children }: { children: ReactNode }): ReactNode {
+export function AppShell({
+  children,
+  accountMenu,
+}: {
+  children: ReactNode;
+  accountMenu: ReactNode;
+}): ReactNode {
   return (
     <div className="min-h-dvh">
       <a
@@ -21,7 +28,7 @@ export function AppShell({ children }: { children: ReactNode }): ReactNode {
       <DesktopSidebar />
 
       <div className="motion-safe:transition-[padding] motion-safe:duration-200 motion-safe:ease-out md:pl-(--sidebar-width-collapsed) lg:pl-(--sidebar-width) lg:sidebar-collapsed:pl-(--sidebar-width-collapsed)">
-        <AppHeader />
+        <AppHeader accountMenu={accountMenu} />
         {/* Bottom padding keeps the last content above the fixed mobile navigation bar. */}
         <main
           id="main-content"

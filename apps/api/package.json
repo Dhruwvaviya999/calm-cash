@@ -10,15 +10,19 @@
     "start": "node --env-file-if-exists=../../.env --enable-source-maps dist/server.js",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
     "@calmcash/shared": "workspace:*",
     "@prisma/adapter-pg": "catalog:",
     "@prisma/client": "catalog:",
+    "argon2": "^0.45.1",
     "cors": "^2.8.6",
     "express": "^5.3.0",
+    "express-rate-limit": "^8.7.1",
     "helmet": "^8.3.0",
+    "nodemailer": "~10.0.16",
     "pino": "^10.4.0",
     "pino-http": "^11.0.0",
     "zod": "catalog:"

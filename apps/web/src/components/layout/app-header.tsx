@@ -5,13 +5,13 @@ import { Wordmark } from '@/components/brand/wordmark';
 import { ThemeToggle } from '@/components/theme/theme-toggle';
 
 import { HeaderContext } from './header-context';
-import { UserMenu } from './user-menu';
 
 /**
  * Top application bar. Mobile: compact bar with the CalmCash identity. Tablet/desktop: the
- * current location (breadcrumb). Theme and account controls are always on the right.
+ * current location (breadcrumb). Theme and account controls are always on the right. The account
+ * menu is passed in, so this design-system component stays independent of the auth feature.
  */
-export function AppHeader(): ReactNode {
+export function AppHeader({ accountMenu }: { accountMenu: ReactNode }): ReactNode {
   return (
     <header className="sticky top-0 z-20 border-b bg-background pt-safe">
       <div className="flex h-(--app-header-height) items-center gap-3 px-gutter">
@@ -23,7 +23,7 @@ export function AppHeader(): ReactNode {
         </div>
         <div className="ml-auto flex items-center gap-1">
           <ThemeToggle />
-          <UserMenu />
+          {accountMenu}
         </div>
       </div>
     </header>

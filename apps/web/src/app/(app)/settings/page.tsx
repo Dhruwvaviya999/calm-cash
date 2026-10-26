@@ -1,12 +1,15 @@
-import { CURRENCIES, DEFAULT_CURRENCY, DEFAULT_TIMEZONE } from '@calmcash/shared';
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 
-import { StatusBadge } from '@/components/feedback/status-badge';
 import { PageContainer } from '@/components/layout/page-container';
 import { PageHeader } from '@/components/layout/page-header';
-import { Card } from '@/components/ui/card';
-import { AppearanceSettings, ResetDisplayPreferences } from '@/features/settings';
+import {
+  ActiveSessions,
+  AppearanceSettings,
+  ChangePasswordForm,
+  ProfileSettings,
+  ResetDisplayPreferences,
+} from '@/features/settings';
 import { SystemStatusCard } from '@/features/system-status';
 
 export const metadata: Metadata = { title: 'Settings' };
@@ -41,9 +44,36 @@ function SettingsSection({
 export default function SettingsPage(): ReactNode {
   return (
     <PageContainer>
-      <PageHeader title="Settings" description="Make CalmCash look and feel right for you." />
+      <PageHeader
+        title="Settings"
+        description="Your profile, how you sign in, and how CalmCash looks on this device."
+      />
 
       <div className="flex flex-col gap-8">
+        <SettingsSection
+          id="profile-heading"
+          title="Profile"
+          description="Your name, and the currency and time zone CalmCash uses for money and dates."
+        >
+          <ProfileSettings />
+        </SettingsSection>
+
+        <SettingsSection
+          id="password-heading"
+          title="Password"
+          description="Changing your password keeps you signed in here and signs out every other device."
+        >
+          <ChangePasswordForm />
+        </SettingsSection>
+
+        <SettingsSection
+          id="sessions-heading"
+          title="Where you are signed in"
+          description="A session ends when you sign out, on its end date, or after a few days without use. Resetting your password ends all of them."
+        >
+          <ActiveSessions />
+        </SettingsSection>
+
         <SettingsSection
           id="appearance-heading"
           title="Appearance"
@@ -58,31 +88,6 @@ export default function SettingsPage(): ReactNode {
           description="Restore the default theme and sidebar layout on this device."
         >
           <ResetDisplayPreferences />
-        </SettingsSection>
-
-        <SettingsSection
-          id="regional-heading"
-          title="Currency and region"
-          description="These defaults become editable once you have a CalmCash profile."
-        >
-          <Card className="divide-y">
-            <dl className="divide-y">
-              <div className="flex items-center justify-between gap-4 px-5 py-4">
-                <dt className="text-sm text-muted-foreground">Default currency</dt>
-                <dd className="text-right text-sm font-medium">
-                  {CURRENCIES[DEFAULT_CURRENCY].name} ({DEFAULT_CURRENCY})
-                </dd>
-              </div>
-              <div className="flex items-center justify-between gap-4 px-5 py-4">
-                <dt className="text-sm text-muted-foreground">Time zone</dt>
-                <dd className="text-right text-sm font-medium">{DEFAULT_TIMEZONE}</dd>
-              </div>
-            </dl>
-            <p className="flex items-center gap-2 px-5 py-3 text-sm text-muted-foreground">
-              <StatusBadge tone="upcoming">Coming soon</StatusBadge>
-              Editing arrives with sign-in.
-            </p>
-          </Card>
         </SettingsSection>
 
         <SettingsSection

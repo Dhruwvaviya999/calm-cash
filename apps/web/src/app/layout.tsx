@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 
 import { PreferencesScript } from '@/components/theme/preferences-script';
 import { PreferencesSync } from '@/components/theme/preferences-sync';
+import { AuthProvider } from '@/features/auth';
 
 import './globals.css';
 
@@ -33,7 +34,8 @@ export default function RootLayout({ children }: LayoutProps<'/'>): ReactNode {
       </head>
       <body>
         <PreferencesSync />
-        {children}
+        {/* Session state for every route: restored from the API, never from browser storage. */}
+        <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
   );

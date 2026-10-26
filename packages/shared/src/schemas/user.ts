@@ -8,6 +8,7 @@ export const userDtoSchema = z.object({
   id: entityIdSchema,
   name: z.string().min(1).max(TEXT_LIMITS.userName),
   email: z.email().max(TEXT_LIMITS.email),
+  emailVerifiedAt: isoDateTimeSchema.exactOptional(),
   preferredCurrency: currencyCodeSchema,
   timezone: timeZoneSchema,
   createdAt: isoDateTimeSchema,
