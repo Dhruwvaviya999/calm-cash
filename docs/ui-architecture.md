@@ -49,7 +49,7 @@ utilities in `@theme inline`. Components use semantic utilities only (`bg-card`,
 | Status              | `success`, `warning`, `warning-text`                                                                                      |
 | Money               | `income` (credit), `expense` (debit), `transfer`                                                                          |
 | Lines and focus     | `border`, `input`, `ring`                                                                                                 |
-| Charts (Phase 6)    | `chart-1` … `chart-5`                                                                                                     |
+| Charts              | `chart-1` … `chart-5` (account accents), `chart-income`, `chart-expense` (cash-flow series, Phase 6)                      |
 | Navigation          | `sidebar`, `sidebar-foreground`, `sidebar-primary`, `sidebar-accent`, `sidebar-border`, `sidebar-ring`                    |
 | Shape and elevation | `--radius` (12px; derived `radius-sm` … `radius-2xl`), `--elevation-1…3` → `shadow-xs…lg`                                 |
 | Shell geometry      | `--sidebar-width` (16rem), `--sidebar-width-collapsed` (4.5rem), `--app-header-height`, `--bottom-nav-height`, `--gutter` |
@@ -58,6 +58,14 @@ utilities in `@theme inline`. Components use semantic utilities only (`bg-card`,
 the focus ring) in both themes: body text is about 16:1, muted text at least 5.3:1, and the
 income, debit, transfer, and warning colours at least 5.2:1 on cards. Re-check any new pair the
 same way before adding it.
+
+**Chart series.** `chart-income` and `chart-expense` are separate from the text tokens: bars need
+3:1 against the card, not 4.5:1, and the pair must stay apart for colour-blind readers. They differ
+in lightness as well as hue (light theme: deep green vs. light coral; dark theme: bright green vs.
+deep coral). Checked with the dataviz palette validator against the card surface: colour-vision
+separation ΔE 10.5 (light, protanopia worst case) and 12.8 (dark, deuteranopia), normal-vision ΔE
+≥ 29, contrast ≥ 3:1, all checks passing. Chart text (values, axis labels, legends) uses text
+tokens, never the series colour.
 
 **Utilities defined in CSS:**
 
@@ -139,6 +147,7 @@ They are owned source files in `components/ui/` and were adapted to the project'
 | feedback | `StatusBadge`, `EmptyState`, `PlannedCapabilities`, `ErrorState`, `PageSkeleton`, `ListSkeleton`, `ConfirmDialog`, `PreviewNotice`                                                       | States and messaging.                                                                                                |
 | finance  | `FinancialAmount`, `StatCard`, `ProgressMeter`, `CategoryIcon`                                                                                                                           | Money display patterns.                                                                                              |
 | forms    | `SearchInput`, `FilterBar`, `FilterOptions`, `FormField`, `PasswordInput`, `MoneyInput`, `FormMessage`                                                                                   | Search, filters, labelled fields with hints and errors, show/hide passwords, exact money entry, form-level feedback. |
+| charts   | `CHART_COLORS`, `AXIS_TICK`, `ChartTooltipCard`, `ChartTooltipRow`, `ChartLegendItem`, `ChartEmptyState`, `ChartSkeleton`, `ChartTableDisclosure`                                        | Recharts building blocks: token colours, tooltip, legend, empty and loading states, "Show as table".                 |
 
 Feature modules (`features/<feature>/`, public API in `index.ts`):
 
@@ -147,7 +156,7 @@ Feature modules (`features/<feature>/`, public API in `index.ts`):
 | `transactions`  | `TransactionsPage` (live page), `TransactionRow`, `TransactionList`, `TransactionHistory` (table + phone rows), forms (`TransactionForm`, `ReconcileForm`), sheets (entry, details, filters, bulk, categories), `transaction-form-model.ts`, `transaction-filters.ts` (URL ⇄ filters) |
 | `budgets`       | `BudgetProgress`, `getBudgetStatus` (on track / close to limit / over budget)                                                                                                                                                                                                         |
 | `accounts`      | `AccountsOverview` (live page), `AccountCard`, `AccountBalance`, `AccountsSummary`, `AccountForm`/`AccountFormSheet`, `AccountDetailsSheet`; `account-form-model.ts` (text ⇄ exact minor units)                                                                                       |
-| `dashboard`     | `BalanceOverview`, `SummaryStats`, `SpendingOverview`, `RecentTransactions`, `BudgetOverview`, view-model types                                                                                                                                                                       |
+| `dashboard`     | `DashboardPage` (live page), `DashboardControls`, sections (`FinancialPosition`, `PeriodSummary`, `RecentActivity`), `CashFlowChart`, `SpendingChart`; `dashboard-selection.ts` (URL ⇄ period and currency)                                                                           |
 | `auth`          | `AuthProvider`/`useAuth` (session lifecycle), `RequireAuth`, `GuestOnly`, `LoginForm`, `RegisterForm`, `ForgotPasswordForm`, `ResetPasswordForm`, `VerifyEmailPanel`, `UserMenu`, `PasswordRequirements`                                                                              |
 | `settings`      | `ProfileSettings`, `ChangePasswordForm`, `ActiveSessions`, `AppearanceSettings`, `ResetDisplayPreferences`                                                                                                                                                                            |
 | `system-status` | `SystemStatusCard` (Phase 1 diagnostics, restyled)                                                                                                                                                                                                                                    |
@@ -156,7 +165,7 @@ Feature modules (`features/<feature>/`, public API in `index.ts`):
 or "Balance adjustment"), _why_ (description or reason), _when_ (date in the user's time zone),
 _how_ (category and payment account), and _how much_ (`FinancialAmount`), with the same structure
 on every screen size. It takes the API's `TransactionListItemDto` (full `AccountDto`/`CategoryDto`
-objects fit too, as in the dashboard preview). Voided rows are dimmed, struck through, and badged.
+objects fit too). Voided rows are dimmed, struck through, and badged.
 
 **Money.** `FinancialAmount` formats with `lib/format.ts`, which converts minor units to an exact
 decimal string (BigInt arithmetic) and formats with `Intl.NumberFormat('en-IN')`. `display` size
@@ -167,19 +176,19 @@ screen-reader label; `directionForTransaction` picks one for any transaction.
 
 **Server first.** Pages and most components are Server Components. Client Components are limited
 to the theme toggle, preference sync, sidebar, bottom bar, More sheet, header breadcrumb, user menu,
-confirm dialog, settings controls, the live accounts and transactions features, the system-status
-card, and the authentication feature (provider, guards, forms), which need the browser to reach the
-API with the session cookie. The transactions page reads its filters from the URL with
-`useSearchParams`, so the route wraps it in a `Suspense` boundary (the static shell still
-prerenders).
+confirm dialog, settings controls, the live dashboard, accounts, and transactions features, the
+system-status card, and the authentication feature (provider, guards, forms), which need the browser
+to reach the API with the session cookie. The dashboard and transactions pages read their state from
+the URL with `useSearchParams`, so their routes wrap them in a `Suspense` boundary (the static shell
+still prerenders).
 
 ## 7. Routes
 
 | Route              | Content in Phase 2                                                                                                                                                            |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `/`                | Temporary (307) redirect to `/dashboard` (which sends signed-out visitors to `/login`).                                                                                       |
-| `/dashboard`       | Visual prototype: balance overview, money in/out/saved, recent transactions, budgets, spending by category.                                                                   |
-| `/transactions`    | **Live data** (§7b). Record, search, filter, edit, void, restore, bulk-edit, and reconcile; `?accountId=`/filters in the URL; `?reconcile=<id>` and `?new=1` open the sheets. |
+| `/dashboard`       | **Live data** (§7c). Position, period summary, cash-flow trend, spending by category, recent activity; `?period=`, `?from=&to=`, `?currency=` in the URL.                     |
+| `/transactions`    | **Live data** (§7b). Record, search, filter, edit, void, restore, bulk-edit, and reconcile; filters in the URL; `?reconcile=<id>`, `?new=1`, `?transaction=<id>` open sheets. |
 | `/budgets`         | Upcoming-feature state and sample budget progress cards.                                                                                                                      |
 | `/accounts`        | **Live data.** Totals per currency (held vs. owed), accounts grouped by classification, active/archived filter, add/edit sheet, details sheet, archive and restore.           |
 | `/insights`        | Upcoming-feature state and what to expect (no generated insights).                                                                                                            |
@@ -212,7 +221,7 @@ the `(auth)` pages are public, and `/login` and `/register` send signed-in users
   controlled mode from a menu. After any change the list refreshes in the background
   (`useAsyncResource().refresh`) without flashing a skeleton, and a status message confirms it.
 - Account accents (`color`) map onto the chart tokens, so both themes keep their checked contrast.
-- The dashboard is unchanged and still shows labelled sample data.
+- Phase 6: the dashboard's "Where you stand" shows the same per-currency summary.
 - Phase 5: account details show how many transactions the balance includes and link to
   **View transactions** (`/transactions?accountId=…`) and **Correct balance**
   (`/transactions?reconcile=…`).
@@ -257,20 +266,63 @@ the `(auth)` pages are public, and `/login` and `/register` send signed-in users
   Void for the selection (all or nothing, as the API guarantees).
 - **Categories.** A sheet lists categories by kind with add (optionally inside a top-level one),
   rename, archive, and restore.
+- **Deep link (Phase 6).** `?transaction=<id>` loads that transaction (`getTransaction`) and opens
+  its details sheet over the current list; closing the sheet removes the parameter. The dashboard's
+  recent activity links here.
+
+## 7c. Dashboard (Phase 6)
+
+- **Live only.** Four independent requests (`services/dashboard.service.ts`: overview, trends,
+  categories; plus the newest transactions from `transactions.service.ts`). Each section has its own
+  skeleton, error with retry, and empty state, so one failing request never blanks the page; the
+  period controls always stay usable. Responses that arrive after the selection has changed are
+  ignored. There is no fallback to sample data and nothing is cached in the browser.
+- **States.** _No accounts yet_ (first-use: add an account), _no transactions yet_ (record the first
+  one), _nothing in this period_ (per chart, naming the currency), _no earlier period to compare
+  with_, loading, and per-section errors.
+- **Controls.** Period: this month, last month, last 3 months, last 6 months, this year, or a custom
+  range (validated start/end dates, end not in the future). Currency: shown only when the user holds
+  more than one. Both live in the URL (`dashboard-selection.ts`, `router.replace` without scrolling),
+  so a view can be bookmarked and survives refresh. All dates are in the user's time zone.
+- **Where you stand.** Money held and amount owed per currency from the accounts summary, never
+  added together, labelled as current (not affected by the period).
+- **Period summary.** Money in, money out, net cash flow, savings rate — each with its change against
+  the comparable previous period, named explicitly ("vs 1 Sept – 27 Sept 2026"). Changes are neutral
+  in colour (an arrow, not red/green, because more spending is not always bad). Without income the
+  savings rate reads "—" with "Needs income in this period", never 0 %. Help disclosures explain net
+  cash flow (not a balance) and the savings rate (cash flow only: transfers and balance corrections
+  are not included; negative when spending exceeds income).
+- **Money in and out** (`CashFlowChart`). Grouped bars, one pair per day, week, month, or year
+  (chosen by the API), one axis, compact currency ticks, legend, tooltip (money in, money out, net),
+  keyboard navigation (Recharts `accessibilityLayer`), and "Show as table". Clicking a bar opens
+  Transactions filtered to that type and bucket's dates.
+- **Where your money went** (`SpendingChart`). Horizontal bars in one hue (magnitude, not identity),
+  ranked, with direct value labels and truncated category names; "Other" and "Uncategorised" as the
+  API returns them; "Show as table" with shares. A category bar opens its expenses for the period
+  (`?type=expense&categoryId=…&from=…&to=…`); "Other" and "Uncategorised" open all expenses of the
+  period, because the transaction filters cannot express "not these categories".
+- **Recent activity.** The six newest active transactions in every currency, as `TransactionRow`s,
+  each opening its details on the Transactions page (`?transaction=<id>`).
+- **Budgets** are not shown: they arrive with their own phase, so the dashboard has no placeholder
+  budget figures.
+- Charts render at 320px without horizontal scrolling; long category names truncate with the full
+  name in the tooltip and the table.
 
 ## 8. Prototype data rules
 
 - Sample data lives only in [`src/fixtures/sample-finances.ts`](../apps/web/src/fixtures/sample-finances.ts).
   It is typed with the shared DTOs and feature view models, validated against the shared Zod
   schemas by a test, and its totals are internally consistent (also tested).
-- Only route files (and features via props) may use it. ESLint forbids importing fixtures from
-  `components/`, `hooks/`, `lib/`, `services/`, and `types/`.
-- Every screen showing fixture data carries a "Design preview" badge, a `PreviewNotice`, or a
-  "Sample data" badge. Aggregates (balances, totals) are stated in the fixture, never calculated in
-  the UI. Real figures will come from the API.
-- **Replacing a prototype:** keep the feature components and pass them API data. For example, the
-  dashboard page will build `MonthSummary` and `TransactionListItem[]` from service calls instead
-  of fixtures, and the shell needs no changes.
+- Only prototype route files (and features via props) may use it. ESLint forbids importing fixtures
+  from `components/`, `hooks/`, `lib/`, `services/`, `types/`, and — since Phase 6 — from the live
+  features and routes (`features/{dashboard,accounts,transactions}/**` and
+  `app/*/{dashboard,accounts,transactions}/**`), so a live page cannot fall back to sample data.
+- Since Phase 6 the fixture holds only what the Budgets preview needs (categories and sample
+  budgets). Every screen showing fixture data carries a "Design preview" badge, a `PreviewNotice`,
+  or a "Sample data" badge. Aggregates are stated in the fixture, never calculated in the UI.
+- **Replacing a prototype:** build the live feature against the API, delete the prototype
+  components and their fixture data, and extend the lint ban to the new live paths. The shell needs
+  no changes.
 
 ## 9. Accessibility checklist
 

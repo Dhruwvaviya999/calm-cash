@@ -20,6 +20,7 @@ import {
 import type { AuthRateLimits, RateLimitRule } from '../modules/auth/auth.rate-limits';
 import { createPrismaAuthRepository, type AuthRepository } from '../modules/auth/auth.repository';
 import { createPrismaCategoriesRepository } from '../modules/categories/categories.repository';
+import { createPrismaDashboardRepository } from '../modules/dashboard/dashboard.repository';
 import { createPrismaTagsRepository } from '../modules/tags/tags.repository';
 import {
   createPrismaTransactionsRepository,
@@ -136,6 +137,7 @@ export function useIntegrationDatabase(): {
         },
         categories: { repository: createPrismaCategoriesRepository(prisma), now: clock.now },
         tags: { repository: createPrismaTagsRepository(prisma) },
+        dashboard: { repository: createPrismaDashboardRepository(prisma), now: clock.now },
       });
       return { app, prisma, repository, email, clock, tasks };
     },

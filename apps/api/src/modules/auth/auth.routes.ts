@@ -1,5 +1,6 @@
 import {
   changePasswordInputSchema,
+  currencyCodeSchema,
   entityIdSchema,
   forgotPasswordInputSchema,
   loginInputSchema,
@@ -13,6 +14,7 @@ import { Router, type RequestHandler } from 'express';
 import { z } from 'zod';
 
 import type { SessionConfig } from '../../config/env';
+import type { Caller } from '../../lib/auth-boundary';
 import type { BackgroundTasks } from '../../lib/background-tasks';
 import type { EmailService } from '../../lib/email';
 import { validateRequest } from '../../middleware/validate-request';
@@ -50,7 +52,7 @@ export interface AuthModule {
   /** 403 unless state-changing requests carry the session's CSRF token. */
   requireCsrf: RequestHandler;
   /** The signed-in caller of a request that passed `requireSession`. */
-  getCaller: (req: object) => { userId: string; timeZone: string };
+  getCaller: (req: object) => Caller;
 }
 
 const body = <TSchema extends z.ZodType>(schema: TSchema): z.ZodObject<{ body: TSchema }> =>
@@ -158,7 +160,12 @@ export function createAuthModule(
     requireCsrf,
     getCaller: (req) => {
       const { user } = getAuthContext(req);
-      return { userId: user.id, timeZone: user.timezone };
+      return {
+        userId: user.id,
+        timeZone: user.timezone,
+        // Stored codes are always supported ones (validated on every profile update).
+        preferredCurrency: currencyCodeSchema.parse(user.preferredCurrency),
+      };
     },
   };
 }

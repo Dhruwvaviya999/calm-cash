@@ -7,6 +7,7 @@ import { createPrismaClient } from '../lib/database';
 import { createPrismaAccountsRepository } from '../modules/accounts/accounts.repository';
 import { createPrismaAuthRepository } from '../modules/auth/auth.repository';
 import { createPrismaCategoriesRepository } from '../modules/categories/categories.repository';
+import { createPrismaDashboardRepository } from '../modules/dashboard/dashboard.repository';
 import { createPrismaTagsRepository } from '../modules/tags/tags.repository';
 import { createPrismaTransactionsRepository } from '../modules/transactions/transactions.repository';
 import { createArgon2PasswordHasher } from '../modules/auth/password-hasher';
@@ -67,6 +68,7 @@ export function createTestApp(overrides: Partial<AppDependencies> = {}): Express
     transactions: { repository: createPrismaTransactionsRepository(offline) },
     categories: { repository: createPrismaCategoriesRepository(offline) },
     tags: { repository: createPrismaTagsRepository(offline) },
+    dashboard: { repository: createPrismaDashboardRepository(offline) },
     ...overrides,
   });
 }

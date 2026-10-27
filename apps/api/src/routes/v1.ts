@@ -5,6 +5,11 @@ import {
   createAccountsRouter,
   type AccountsModuleDependencies,
 } from '../modules/accounts/accounts.routes';
+import { createAccountsService } from '../modules/accounts';
+import {
+  createDashboardRouter,
+  type DashboardModuleDependencies,
+} from '../modules/dashboard/dashboard.routes';
 import {
   createCategoriesRouter,
   type CategoriesModuleDependencies,
@@ -29,6 +34,7 @@ export interface V1RouterDependencies {
   transactions: TransactionsModuleDependencies;
   categories: CategoriesModuleDependencies;
   tags: TagsModuleDependencies;
+  dashboard: DashboardModuleDependencies;
 }
 
 /**
@@ -51,6 +57,15 @@ export function createV1Router(dependencies: V1RouterDependencies): Router {
   router.use('/transactions', createTransactionsRouter(dependencies.transactions, boundary));
   router.use('/categories', createCategoriesRouter(dependencies.categories, boundary));
   router.use('/tags', createTagsRouter(dependencies.tags, boundary));
+  // The dashboard reads the financial position from the accounts module's authoritative summary.
+  const accounts = createAccountsService({
+    repository: dependencies.accounts.repository,
+    now: dependencies.accounts.now ?? ((): Date => new Date()),
+  });
+  router.use(
+    '/dashboard',
+    createDashboardRouter(dependencies.dashboard, accounts.summary, boundary),
+  );
 
   return router;
 }

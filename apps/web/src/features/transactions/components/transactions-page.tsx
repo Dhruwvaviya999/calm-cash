@@ -40,6 +40,7 @@ import { listAccounts } from '@/services/accounts.service';
 import { listCategories } from '@/services/categories.service';
 import {
   bulkUpdateTransactions,
+  getTransaction,
   getTransactionSummary,
   listTags,
   listTransactions,
@@ -138,7 +139,8 @@ function describeScope(filters: TransactionFilters, timeZone: string, filtered: 
 export function TransactionsPage(): ReactNode {
   const { user } = useSignedInSession();
   const timeZone = user.timezone;
-  const { filters, setFilters, reconcileAccountId, wantsNew } = useTransactionFilters();
+  const { filters, setFilters, reconcileAccountId, wantsNew, linkedTransactionId } =
+    useTransactionFilters();
 
   const refs = useAsyncResource(loadReferenceData);
   const query = listQuery(filters);
@@ -155,6 +157,16 @@ export function TransactionsPage(): ReactNode {
     [query, totalsQuery, showSummary],
   );
   const data = useAsyncResource(loadPage);
+
+  // `?transaction=<id>` (e.g. from the dashboard) opens that transaction's details.
+  const linked = useAsyncResource(
+    useCallback(
+      async (signal: AbortSignal): Promise<TransactionListItemDto | undefined> =>
+        linkedTransactionId === undefined ? undefined : getTransaction(linkedTransactionId, signal),
+      [linkedTransactionId],
+    ),
+  );
+  const linkedItem = linked.state.status === 'success' ? linked.state.data : undefined;
 
   const [entryMode, setEntryMode] = useState<EntrySheetMode | undefined>();
   const [details, setDetails] = useState<TransactionListItemDto | undefined>();
@@ -199,6 +211,14 @@ export function TransactionsPage(): ReactNode {
     refs.refresh();
   };
 
+  const shownDetails = details ?? linkedItem;
+  const closeDetails = (): void => {
+    setDetails(undefined);
+    if (linkedTransactionId !== undefined) {
+      setFilters(filters); // Drops `transaction` from the URL.
+    }
+  };
+
   const closeEntry = (): void => {
     setEntryMode(undefined);
     if (intentMode !== undefined) {
@@ -217,7 +237,7 @@ export function TransactionsPage(): ReactNode {
   };
 
   const restore = (item: TransactionListItemDto): void => {
-    setDetails(undefined);
+    closeDetails();
     void runAction(async () => {
       await restoreTransaction(item.transaction.id);
       return `${counterpartyTitle(item)} was restored and counts again.`;
@@ -606,6 +626,11 @@ export function TransactionsPage(): ReactNode {
       </div>
 
       {notice !== undefined && <FormMessage tone={notice.tone}>{notice.message}</FormMessage>}
+      {linkedTransactionId !== undefined && linked.state.status === 'error' && (
+        <FormMessage tone="error">
+          That transaction could not be opened. {describeRequestError(linked.state.error)}
+        </FormMessage>
+      )}
       {updating && (
         <p role="status" className="text-sm text-muted-foreground">
           Updating…
@@ -639,18 +664,16 @@ export function TransactionsPage(): ReactNode {
       />
 
       <TransactionDetailsSheet
-        item={details}
+        item={shownDetails}
         timeZone={timeZone}
-        onClose={() => {
-          setDetails(undefined);
-        }}
+        onClose={closeDetails}
         onEdit={(item) => {
-          setDetails(undefined);
+          closeDetails();
           setNotice(undefined);
           setEntryMode({ kind: 'edit', item });
         }}
         onVoid={(item) => {
-          setDetails(undefined);
+          closeDetails();
           setVoidTargets([item]);
         }}
         onRestore={restore}

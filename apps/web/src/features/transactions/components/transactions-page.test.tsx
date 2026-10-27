@@ -591,4 +591,23 @@ describe('TransactionsPage', () => {
       '1 of 1 transactions changed.',
     );
   });
+
+  it('opens the details of a transaction linked from another page', async () => {
+    respond();
+    services.getTransaction.mockResolvedValue(groceriesItem);
+    navigation.set(`/transactions?transaction=${groceriesItem.transaction.id}`);
+    renderWithAuth(<TransactionsPage />);
+
+    const sheet = await screen.findByRole('dialog', { name: 'FreshMart' });
+    expect(within(sheet).getByText('Weekly groceries')).toBeDefined();
+    expect(services.getTransaction).toHaveBeenCalledWith(
+      groceriesItem.transaction.id,
+      expect.any(AbortSignal),
+    );
+
+    await userEvent.setup().keyboard('{Escape}');
+    await waitFor(() => {
+      expect(navigation.replace).toHaveBeenLastCalledWith('/transactions', { scroll: false });
+    });
+  });
 });

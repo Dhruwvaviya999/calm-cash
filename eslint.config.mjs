@@ -89,10 +89,14 @@ export default defineConfig(
     },
   },
 
-  // Prototype fixtures may only feed preview UI (routes and features), never infrastructure or
-  // the reusable design system.
+  // Prototype fixtures may only feed preview UI, never infrastructure, the reusable design system,
+  // or a live page (dashboard, accounts, transactions), where they could pass for real data.
   {
-    files: ['apps/web/src/{components,hooks,lib,services,types}/**/*.{ts,tsx}'],
+    files: [
+      'apps/web/src/{components,hooks,lib,services,types}/**/*.{ts,tsx}',
+      'apps/web/src/features/{dashboard,accounts,transactions}/**/*.{ts,tsx}',
+      'apps/web/src/app/*/{dashboard,accounts,transactions}/**/*.{ts,tsx}',
+    ],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -101,7 +105,7 @@ export default defineConfig(
             {
               group: ['@/fixtures', '@/fixtures/*', '**/fixtures/*'],
               message:
-                'Sample fixtures are prototype-only and must not reach shared code or services.',
+                'Sample fixtures are prototype-only and must not reach shared code, services, or live pages.',
             },
           ],
         },

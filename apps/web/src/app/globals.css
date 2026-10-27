@@ -61,6 +61,10 @@
   --chart-3: oklch(0.75 0.13 78);
   --chart-4: oklch(0.58 0.11 290);
   --chart-5: oklch(0.65 0.13 30);
+  /* Income vs expense marks: separated by lightness so the pair stays distinct under red-green
+     colour-vision deficiency (validated: CVD ΔE 16, contrast ≥ 3:1 on cards). */
+  --chart-income: oklch(0.45 0.105 160);
+  --chart-expense: oklch(0.65 0.15 35);
 
   /* Navigation */
   --sidebar: oklch(0.976 0.005 85);
@@ -143,6 +147,8 @@
   --chart-3: oklch(0.8 0.12 80);
   --chart-4: oklch(0.7 0.11 290);
   --chart-5: oklch(0.74 0.12 32);
+  --chart-income: oklch(0.66 0.13 165);
+  --chart-expense: oklch(0.54 0.16 32);
 
   --sidebar: oklch(0.185 0.009 260);
   --sidebar-foreground: oklch(0.9 0.006 260);
@@ -200,6 +206,8 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+  --color-chart-income: var(--chart-income);
+  --color-chart-expense: var(--chart-expense);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);

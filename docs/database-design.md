@@ -398,6 +398,75 @@ archived rule). Integration tests fire parallel requests on separate connections
 simultaneous spending cannot overdraw cash and that crossing transfers neither deadlock nor lose
 money; removing the lock makes the first of those tests fail.
 
+## 3c. Dashboard metrics (Phase 6)
+
+All dashboard figures are read-only aggregates over the tables above; Phase 6 adds no table, column,
+index, or migration.
+
+### What counts as cash flow
+
+One SQL fragment, `cashFlowScope` in `apps/api/src/modules/dashboard/dashboard.repository.ts`,
+defines it for every dashboard query:
+
+- the caller's rows only (`user_id`), in **one** currency;
+- `voided_at IS NULL` — voided rows never count;
+- type in `CASH_FLOW_TRANSACTION_TYPES` (`income`, `expense`) — **transfers** move money between the
+  user's own accounts and **balance adjustments** correct a balance; neither is income or spending;
+- `occurred_at` in a half-open window `[start of from, start of the day after to)`, both instants
+  computed with `startOfDayInTimeZone` in the user's time zone. A purchase at 23:59 local time on
+  31 March is March, even when that instant is already April in UTC (and vice versa).
+
+The Phase 5 transaction summary uses the same `CASH_FLOW_TRANSACTION_TYPES`, and an integration test
+checks that both report the same totals for the same period.
+
+### Metric definitions
+
+| Metric             | Definition                                                                                                                                                                                                                   |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Money held / owed  | The accounts module's summary of **active** accounts, per currency (§3a). Current, not period-bound.                                                                                                                         |
+| Income / expenses  | `SUM(amount_minor)` of cash-flow rows of that type in the period.                                                                                                                                                            |
+| Net cash flow      | Income − expenses (may be negative).                                                                                                                                                                                         |
+| Savings rate       | (income − expenses) ÷ income, in basis points, rounded half away from zero; **unavailable** (`no_income`) when income is 0. Never clamped: overspending gives a negative rate.                                               |
+| Change vs previous | (current − previous) ÷ previous per metric; **unavailable** (`no_previous_value`) when the previous value is 0. The whole comparison is unavailable (`no_previous_activity`) when the previous period has no cash-flow rows. |
+| Category share     | Category spend ÷ total spend, each rounded on its own (shares may sum to 99.99–100.01 %).                                                                                                                                    |
+
+All arithmetic is `bigint` (`packages/shared/src/analytics/ratios.ts`); only the browser rounds again,
+to one decimal place, for display.
+
+### Periods
+
+- **Presets** in the user's calendar: this month (1st → today), last month (whole), last 3 and
+  6 months (from the 1st of the month, 2 or 5 months back → today), this year (1 Jan → today).
+- **Previous period**: a preset shifts back by its length in calendar months, keeping partial
+  periods partial (1–27 Oct ↔ 1–27 Sep) and whole months whole (if the end is a month's last day, so
+  is the previous end: all of March ↔ all of February). A custom range compares with the same
+  number of days immediately before it.
+- **Trend buckets**: `date_trunc(unit, occurred_at AT TIME ZONE tz)` — days up to 45 days, ISO weeks
+  (Monday) up to 190, months up to 1,100, years beyond. Buckets cut by the range are marked
+  `partial`; buckets without activity are filled with zeros by the API, never omitted.
+
+### Categories
+
+Expenses roll up to their top-level category (`COALESCE(c.parent_id, c.id)`): a "Food › Delivery"
+expense counts towards Food. Both category joins repeat `user_id = t.user_id`, so another user's
+category can never be matched. Rows without a category become **Uncategorised** (only when such
+rows exist). The six largest are listed; the rest are summed exactly into **Other**, unless only one
+is left, which is then shown by name. Archived categories keep their history and are flagged.
+
+### Query cost
+
+Each endpoint runs a fixed number of aggregate queries regardless of data size (no N+1): the
+overview runs the account-currency list, an `EXISTS`, the accounts summary, and one totals query
+that covers both periods (a `VALUES` list of windows joined to the rows). The trend and category
+endpoints each run one aggregate plus the currency list.
+
+Every query filters on `user_id` and an `occurred_at` range, which is exactly the existing
+`transactions (user_id, occurred_at DESC)` index. Checked with `EXPLAIN ANALYZE` on a 500,000-row
+clone of the table (200 users; one user with ~1,400 rows in the month): both the trend and the
+two-window totals query use a bitmap scan of `transactions_user_id_occurred_at_idx` with both bounds
+as index conditions, in 5–8 ms. No new index is needed; a covering index can be considered if
+very long histories make the heap reads dominant.
+
 ## 4. Integrity rules
 
 ### Constraints
@@ -475,25 +544,25 @@ database level later if needed.
   user's `timezone`.
 - **Indexes:**
 
-  | Index                                               | Serves                                               |
-  | --------------------------------------------------- | ---------------------------------------------------- |
-  | `transactions (user_id, occurred_at DESC)`          | A user's timeline, newest first; date-range reports. |
-  | `transactions (account_id, occurred_at DESC)`       | An account ledger; balance calculation.              |
-  | `transactions (transfer_account_id)`                | Incoming transfers for an account's balance.         |
-  | `transactions (category_id)`                        | Category reports and `ON DELETE SET NULL`.           |
-  | `budgets (user_id)`, `budgets (category_id)`        | A user's budgets; FK checks.                         |
-  | `sessions (user_id)`                                | A user's sessions (list, revoke others).             |
-  | `sessions (expires_at)`, `auth_tokens (expires_at)` | Cleanup of ended records.                            |
-  | `auth_tokens (user_id, purpose)`                    | Replacing a user's outstanding tokens.               |
-  | `accounts (user_id, archived_at)`                   | A user's accounts, filtered by status (Phase 4).     |
-  | `transactions USING GIN (tags)`                     | Tag filters and search (Phase 5).                    |
-  | unique `transactions (user_id, idempotency_key)`    | Retried creates find their first row (Phase 5).      |
-  | `categories (parent_id)`                            | Subcategories; category filters include children.    |
+  | Index                                               | Serves                                              |
+  | --------------------------------------------------- | --------------------------------------------------- |
+  | `transactions (user_id, occurred_at DESC)`          | A user's timeline, newest first; dashboard periods. |
+  | `transactions (account_id, occurred_at DESC)`       | An account ledger; balance calculation.             |
+  | `transactions (transfer_account_id)`                | Incoming transfers for an account's balance.        |
+  | `transactions (category_id)`                        | Category reports and `ON DELETE SET NULL`.          |
+  | `budgets (user_id)`, `budgets (category_id)`        | A user's budgets; FK checks.                        |
+  | `sessions (user_id)`                                | A user's sessions (list, revoke others).            |
+  | `sessions (expires_at)`, `auth_tokens (expires_at)` | Cleanup of ended records.                           |
+  | `auth_tokens (user_id, purpose)`                    | Replacing a user's outstanding tokens.              |
+  | `accounts (user_id, archived_at)`                   | A user's accounts, filtered by status (Phase 4).    |
+  | `transactions USING GIN (tags)`                     | Tag filters and search (Phase 5).                   |
+  | unique `transactions (user_id, idempotency_key)`    | Retried creates find their first row (Phase 5).     |
+  | `categories (parent_id)`                            | Subcategories; category filters include children.   |
+  | unique `categories (user_id, kind, name)`           | Also serves "categories of a user".                 |
 
   Search (`q`) uses case-insensitive `LIKE` on description, merchant, notes, and category names,
   scoped by `user_id` (a personal ledger is small); wildcards in the search text are escaped. A
   trigram index is the next step if histories grow large.
-  | unique `categories (user_id, kind, name)` | Also serves "categories of a user". |
 
 ## 6. Database models vs. API DTOs
 
@@ -540,6 +609,7 @@ literal unions are identical, both at runtime and at the type level.
   stay active, untagged, and valid), category `parent_id`/`archived_at`, the indexes above, and the
   CHECK constraints (which only concern new columns or the new type, so no existing row can fail).
   They were applied with `prisma migrate deploy`; no data was reset.
+- **Phase 6** has no migration: the dashboard only reads existing tables through existing indexes.
 - **Check for drift:**
   `pnpm exec prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code`
   exits with 0 when the database matches the schema.

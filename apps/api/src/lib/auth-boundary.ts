@@ -1,3 +1,4 @@
+import type { CurrencyCode } from '@calmcash/shared';
 import type { RequestHandler } from 'express';
 
 /** Who is calling; provided by the authentication module, never by the request. */
@@ -5,6 +6,8 @@ export interface Caller {
   userId: string;
   /** IANA time zone of the user, for "today", calendar-date filters, and opening dates. */
   timeZone: string;
+  /** The user's preferred currency: the default for new accounts and the dashboard. */
+  preferredCurrency: CurrencyCode;
 }
 
 /**

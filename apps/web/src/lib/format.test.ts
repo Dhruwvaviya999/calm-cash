@@ -2,6 +2,8 @@ import { MINOR_UNITS_MAX } from '@calmcash/shared';
 import { describe, expect, it } from 'vitest';
 
 import {
+  formatBasisPoints,
+  formatCompactMoney,
   formatDate,
   formatDateTime,
   formatMoney,
@@ -77,5 +79,29 @@ describe('formatDateTime', () => {
     const instant = '2026-10-24T20:30:00.000Z';
     expect(formatDateTime(instant)).toBe('25 Oct 2026, 2:00 am');
     expect(formatDateTime(instant, 'America/New_York')).toBe('24 Oct 2026, 4:30 pm');
+  });
+});
+
+describe('formatBasisPoints', () => {
+  it('shows one decimal place, rounding only for display', () => {
+    expect(formatBasisPoints('9496')).toBe('95.0%');
+    expect(formatBasisPoints('625', { signed: true })).toBe('+6.3%');
+    expect(formatBasisPoints('0', { signed: true })).toBe('0.0%');
+    expect(formatBasisPoints('-25000')).toBe('−250.0%');
+    // −0.04% rounds to zero and is shown without a sign.
+    expect(formatBasisPoints('-4')).toBe('0.0%');
+  });
+
+  it('stays exact for ratios beyond safe integers', () => {
+    expect(formatBasisPoints('-9999999999999980000')).toBe('−99,99,99,99,99,99,99,800.0%');
+  });
+});
+
+describe('formatCompactMoney', () => {
+  it('abbreviates axis labels in the currency’s own conventions', () => {
+    expect(formatCompactMoney('10000000', 'INR')).toBe('₹1L');
+    expect(formatCompactMoney(250000n, 'USD')).toBe('$2.5K');
+    expect(formatCompactMoney(-150000n, 'INR')).toBe('−₹1.5K');
+    expect(formatCompactMoney('1500', 'JPY')).toBe('JP¥1.5K');
   });
 });

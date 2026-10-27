@@ -22,4 +22,4 @@ export {
 } from './account-ledger';
 export { toAccountDto, toIsoDate } from './accounts.mapper';
 export type { AccountRecord } from './accounts.repository';
-export type { Caller } from './accounts.service';
+export { createAccountsService, type AccountsService, type Caller } from './accounts.service';

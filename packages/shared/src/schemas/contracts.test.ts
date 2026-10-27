@@ -14,6 +14,12 @@ import type {
 } from '../types/account';
 import type { ApiErrorResponse } from '../types/api';
 import type {
+  DashboardCategoriesDto,
+  DashboardOverviewDto,
+  DashboardQuery,
+  DashboardTrendsDto,
+} from '../types/dashboard';
+import type {
   AcceptedDto,
   AuthSessionDto,
   ChangePasswordInput,
@@ -70,6 +76,12 @@ import type {
   updateAccountInputSchema,
 } from './account';
 import type { apiErrorResponseSchema } from './api';
+import type {
+  dashboardCategoriesDtoSchema,
+  dashboardOverviewDtoSchema,
+  dashboardQuerySchema,
+  dashboardTrendsDtoSchema,
+} from './dashboard';
 import type {
   acceptedDtoSchema,
   authSessionDtoSchema,
@@ -214,5 +226,16 @@ describe('schema ⇄ interface contracts', () => {
     expectTypeOf<z.output<typeof createCategoryInputSchema>>().toEqualTypeOf<CreateCategoryInput>();
     expectTypeOf<z.output<typeof updateCategoryInputSchema>>().toEqualTypeOf<UpdateCategoryInput>();
     expectTypeOf<z.output<typeof categoryListDtoSchema>>().toEqualTypeOf<CategoryListDto>();
+  });
+
+  it('infers exactly the dashboard query and response types', () => {
+    expectTypeOf<z.output<typeof dashboardQuerySchema>>().toEqualTypeOf<DashboardQuery>();
+    expectTypeOf<
+      z.output<typeof dashboardOverviewDtoSchema>
+    >().toEqualTypeOf<DashboardOverviewDto>();
+    expectTypeOf<z.output<typeof dashboardTrendsDtoSchema>>().toEqualTypeOf<DashboardTrendsDto>();
+    expectTypeOf<
+      z.output<typeof dashboardCategoriesDtoSchema>
+    >().toEqualTypeOf<DashboardCategoriesDto>();
   });
 });

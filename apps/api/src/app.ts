@@ -18,6 +18,7 @@ import { createRequestLogger } from './middleware/request-logger';
 import type { AccountsModuleDependencies } from './modules/accounts/accounts.routes';
 import type { AuthModuleDependencies } from './modules/auth/auth.routes';
 import type { CategoriesModuleDependencies } from './modules/categories/categories.routes';
+import type { DashboardModuleDependencies } from './modules/dashboard/dashboard.routes';
 import type { TagsModuleDependencies } from './modules/tags/tags.routes';
 import type { TransactionsModuleDependencies } from './modules/transactions/transactions.routes';
 import { createV1Router } from './routes/v1';
@@ -34,6 +35,7 @@ export interface AppDependencies {
   transactions: TransactionsModuleDependencies;
   categories: CategoriesModuleDependencies;
   tags: TagsModuleDependencies;
+  dashboard: DashboardModuleDependencies;
 }
 
 /**
@@ -50,6 +52,7 @@ export function createApp({
   transactions,
   categories,
   tags,
+  dashboard,
 }: AppDependencies): Express {
   const app = express();
 
@@ -87,6 +90,7 @@ export function createApp({
       transactions,
       categories,
       tags,
+      dashboard,
       authConfig: { session: config.session, webAppUrl: config.webAppUrl },
     }),
   );

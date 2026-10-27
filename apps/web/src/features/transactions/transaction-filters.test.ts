@@ -19,7 +19,7 @@ describe('readFilters', () => {
     const filters = readFilters(
       new URLSearchParams(
         `q=fresh&type=expense&accountId=${ACCOUNT}&categoryId=${CATEGORY}&paymentMethod=upi&tags=Family,work&from=2026-10-01&to=2026-10-31&minAmount=10.5&maxAmount=500&status=voided&sort=largest&page=3`,
-      ), 
+      ),
     );
     expect(filters).toEqual({
       q: 'fresh',

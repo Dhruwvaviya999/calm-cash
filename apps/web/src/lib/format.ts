@@ -1,5 +1,6 @@
 import {
   CURRENCIES,
+  divideRounded,
   minorUnitsToDecimalString,
   parseMinorUnits,
   type CurrencyCode,
@@ -105,6 +106,7 @@ const DATE_STYLES = {
   dayMonthYear: { day: 'numeric', month: 'short', year: 'numeric' },
   fullDate: { day: 'numeric', month: 'long', year: 'numeric' },
   monthYear: { month: 'long', year: 'numeric' },
+  monthShortYear: { month: 'short', year: '2-digit' },
 } as const satisfies Readonly<Record<string, Intl.DateTimeFormatOptions>>;
 
 export type DateStyle = keyof typeof DATE_STYLES;
@@ -155,4 +157,53 @@ export function formatDateTime(
     dateTimeFormatters.set(timeZone, formatter);
   }
   return formatter.format(new Date(value));
+}
+
+const percentFormatter = new Intl.NumberFormat(DISPLAY_LOCALE, {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+});
+
+/**
+ * A ratio in basis points (canonical integer string) as a percentage with one decimal place,
+ * e.g. `"9496"` → `"95.0%"`, `"-25000"` → `"−250.0%"`. Rounding happens only here, for display.
+ */
+export function formatBasisPoints(basisPoints: string, { signed = false } = {}): string {
+  // Validated by the response schema; ratios are not money, so they may exceed BIGINT.
+  if (!/^(?:0|-?[1-9]\d*)$/.test(basisPoints)) {
+    throw new RangeError('Expected a whole number of basis points.');
+  }
+  const tenths = divideRounded(BigInt(basisPoints), 10n);
+  const magnitude = tenths < 0n ? -tenths : tenths;
+  const decimal = `${(magnitude / 10n).toString()}.${(magnitude % 10n).toString()}`;
+  if (!isDecimalLiteral(decimal)) {
+    throw new RangeError('Percentage could not be formatted.');
+  }
+  const sign = tenths < 0n ? MINUS_SIGN : signed && tenths > 0n ? '+' : '';
+  return `${sign}${percentFormatter.format(decimal)}%`;
+}
+
+const compactFormatters = new Map<CurrencyCode, Intl.NumberFormat>();
+
+/** Short money label for chart axes, e.g. `"₹1.2L"` or `"$4.5K"`. Exact amounts live elsewhere. */
+export function formatCompactMoney(
+  amount: MinorUnitsString | bigint,
+  currency: CurrencyCode,
+): string {
+  let formatter = compactFormatters.get(currency);
+  if (formatter === undefined) {
+    formatter = new Intl.NumberFormat(DISPLAY_LOCALE, {
+      style: 'currency',
+      currency,
+      notation: 'compact',
+      maximumFractionDigits: 1,
+    });
+    compactFormatters.set(currency, formatter);
+  }
+  const value = toBigInt(amount);
+  const decimal = minorUnitsToDecimalString(value < 0n ? -value : value, currency);
+  if (!isDecimalLiteral(decimal)) {
+    throw new RangeError('Amount could not be converted to a decimal string.');
+  }
+  return `${value < 0n ? MINUS_SIGN : ''}${formatter.format(decimal)}`;
 }

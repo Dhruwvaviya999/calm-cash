@@ -3,18 +3,19 @@
 CalmCash is an AI-powered personal finance tracker. The roadmap covers transaction management,
 budgeting, bank statement imports, financial analytics, AI insights, and recurring payments.
 
-> **Status — Phase 5 (transaction management) complete.** On top of the foundation, design
-> system, authentication, and accounts of Phases 1–4, people record income, expenses, transfers
-> between their accounts, and balance corrections — with who, why, category, payment method, date,
-> notes, and tags — then search, filter, edit, void, restore, and bulk-edit their history. Balances
-> stay exact and consistent under concurrent writes. Accounts and Transactions use live data; the
-> dashboard, budgets, and insights still show clearly labelled sample data until later phases.
+> **Status — Phase 6 (live dashboard and analytics) complete.** On top of the foundation, design
+> system, authentication, accounts, and transactions of Phases 1–5, the dashboard shows what each
+> person holds and owes per currency, and — for a chosen period in their own time zone — money in,
+> money out, net cash flow, and savings rate against the previous period, a cash-flow trend,
+> spending by category, and recent activity, all from exact database aggregates. Dashboard,
+> Accounts, and Transactions use live data; budgets and insights still show clearly labelled sample
+> data until later phases.
 
 ## Tech stack
 
 | Layer       | Technology                                                                                               |
 | ----------- | -------------------------------------------------------------------------------------------------------- |
-| Web         | Next.js 16 (App Router, Turbopack), React 19, Tailwind CSS 4, shadcn/ui (Radix), Lucide icons, Geist     |
+| Web         | Next.js 16 (App Router, Turbopack), React 19, Tailwind CSS 4, shadcn/ui (Radix), Recharts, Lucide, Geist |
 | API         | Node.js 24, Express 5, pino, Helmet                                                                      |
 | Data        | PostgreSQL 18, Prisma 7 (`prisma-client` generator + `@prisma/adapter-pg`)                               |
 | Auth        | Server-side sessions in PostgreSQL, HttpOnly cookies, CSRF tokens, Argon2id, express-rate-limit          |
@@ -35,12 +36,12 @@ calmcash/
 │   │       ├── config/      Validated environment configuration
 │   │       ├── lib/         Database client, logger, errors, request IDs, shutdown
 │   │       ├── middleware/  Request logging, validation, 404, error handler
-│   │       ├── modules/     Feature modules (health, auth, accounts, transactions, categories, tags)
+│   │       ├── modules/     Feature modules (health, auth, accounts, transactions, categories, tags, dashboard)
 │   │       └── routes/      Versioned routers (/api/v1)
 │   └── web/                 Next.js web app (TypeScript)
 │       └── src/
 │           ├── app/         Routes: (app) group with the shared shell, boundaries
-│           ├── components/  Design system: ui primitives, layout, feedback, finance, forms
+│           ├── components/  Design system: ui primitives, layout, feedback, finance, forms, charts
 │           ├── features/    Feature modules (dashboard, transactions, budgets, …)
 │           ├── fixtures/    Prototype-only sample data (always labelled in the UI)
 │           ├── hooks/       Reusable React hooks
@@ -48,7 +49,7 @@ calmcash/
 │           ├── services/    Typed API endpoint functions
 │           └── types/       Web-only types
 ├── packages/
-│   └── shared/              DTO types, Zod schemas, constants, money helpers
+│   └── shared/              DTO types, Zod schemas, constants, money and period/ratio helpers
 ├── prisma/
 │   ├── schema.prisma        Database schema
 │   └── migrations/          Versioned SQL migrations

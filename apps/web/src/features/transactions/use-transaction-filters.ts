@@ -14,6 +14,8 @@ export interface TransactionFiltersState {
   reconcileAccountId: string | undefined;
   /** `?new=1`: another page asked to open the add form. */
   wantsNew: boolean;
+  /** `?transaction=<id>`: another page links to one transaction's details. */
+  linkedTransactionId: string | undefined;
 }
 
 /** The transaction list's filters, kept in the page URL. */
@@ -22,6 +24,7 @@ export function useTransactionFilters(): TransactionFiltersState {
   const router = useRouter();
   const filters = useMemo(() => readFilters(params), [params]);
   const reconcile = entityIdSchema.safeParse(params.get('reconcile'));
+  const linked = entityIdSchema.safeParse(params.get('transaction'));
 
   const setFilters = useCallback(
     (next: TransactionFilters) => {
@@ -38,5 +41,6 @@ export function useTransactionFilters(): TransactionFiltersState {
     setFilters,
     reconcileAccountId: reconcile.success ? reconcile.data : undefined,
     wantsNew: params.get('new') === '1',
+    linkedTransactionId: linked.success ? linked.data : undefined,
   };
 }

@@ -44,7 +44,7 @@ apps/
     lib/                   Cross-cutting infrastructure (errors, logging, DB client, e-mail, auth boundary, …)
     middleware/            Request logging, origin check, validation convention, 404, error handler
     modules/<feature>/     Feature modules (routes → controller → service → repository): health, auth,
-                           accounts, transactions, categories, tags
+                           accounts, transactions, categories, tags, dashboard
     testing/               Test app factories, in-memory e-mail, integration-database harness
     routes/v1.ts           Composition root of API v1: mounts every module router
     generated/prisma/      Generated Prisma Client (git-ignored; `pnpm db:generate`)
@@ -53,8 +53,8 @@ apps/
     features/<feature>/    Feature modules: components and view logic for one capability
     components/            Feature-agnostic design system (see docs/ui-architecture.md)
       ui/                  shadcn/ui primitives (owned source)
-      brand/ layout/ theme/ feedback/ finance/ forms/
-    fixtures/              Prototype-only sample data (never imported by shared code)
+      brand/ layout/ theme/ feedback/ finance/ forms/ charts/
+    fixtures/              Prototype-only sample data (never imported by shared code or live pages)
     testing/               Test setup and helpers (auth context values)
     hooks/                 Reusable React hooks
     lib/                   Infrastructure: env, API client, navigation, formatting, preferences
@@ -65,6 +65,7 @@ packages/shared/src/
   types/                   DTO interfaces and API envelopes
   schemas/                 Zod schemas mirroring every DTO
   money/                   BigInt-based minor-unit helpers
+  analytics/               Calendar periods, trend buckets, basis-point ratios (pure, clock-free)
   index.ts                 The package's only public entry point
 prisma/
   schema.prisma
@@ -333,14 +334,17 @@ Rules that keep modules independent:
   [database-design.md](./database-design.md#3a-accounts-and-balance-semantics-phase-4).
 - **Transactions (Phase 5, done):** see [§14](#14-transactions-categories-and-tags-phase-5) and
   [database-design.md §3b](./database-design.md#3b-transactions-categories-and-tags-phase-5).
-- **Later phases** build on the same ledger: budgets and analytics read cash-flow totals (which
-  exclude transfers, adjustments, and voided rows), and statement imports will add a source and a
-  deduplication fingerprint per row (see the database design).
+- **Dashboard (Phase 6, done):** see [§15](#15-dashboard-and-analytics-phase-6) and the metric
+  definitions in [database-design.md §3c](./database-design.md#3c-dashboard-metrics-phase-6).
+- **Later phases** build on the same ledger: budgets read the same cash-flow definition
+  (`cashFlowScope`, which excludes transfers, adjustments, and voided rows), and statement imports
+  will add a source and a deduplication fingerprint per row (see the database design).
 
 ## 13. Accounts module (Phase 4)
 
 Protected modules receive the session boundary from the auth module through the composition root
-(`routes/v1.ts`): `requireSession`, `requireCsrf`, and `getCaller(req) → { userId, timeZone }`.
+(`routes/v1.ts`): `requireSession`, `requireCsrf`, and
+`getCaller(req) → { userId, timeZone, preferredCurrency }`.
 The accounts module never reads cookies or imports auth internals, and it never takes an owner
 from the request: every query is scoped by `getCaller(req).userId`.
 
@@ -415,3 +419,44 @@ totalPages } }`; `pageSize` defaults to 25 and is capped at 100. Every sort (`ne
 - **Concurrency.** See [database-design.md §3b](./database-design.md#locking-and-concurrency): one
   database transaction per write, transaction rows then accounts locked in ID order, balances
   re-read under the lock, nothing committed unless every rule holds.
+
+## 15. Dashboard and analytics (Phase 6)
+
+Read-only aggregates over the Phase 4 and 5 data. Every route requires a session and answers
+`Cache-Control: no-store`; there is no server-side or Redis cache, so figures are always as fresh as
+the ledger.
+
+| Method & path               | Purpose                                                                           | Success |
+| --------------------------- | --------------------------------------------------------------------------------- | ------- |
+| `GET /dashboard/overview`   | Position (now), cash flow, savings rate, and previous-period comparison           | 200     |
+| `GET /dashboard/trends`     | Income and expenses per calendar bucket (day, ISO week, month, or year), 0-filled | 200     |
+| `GET /dashboard/categories` | Spending per top-level category: top six, an exact "Other", and "Uncategorised"   | 200     |
+
+- **Query.** `dashboardQuerySchema` (strict): `period` (`this-month` by default, `last-month`,
+  `last-3-months`, `last-6-months`, `this-year`, or `custom` with both `from` and `to`), and an
+  optional `currency`. Dates are rejected on presets; a custom end in the future or a start before
+  1900 is `400 VALIDATION_ERROR` on that field. Ranges are computed in the caller's time zone by the
+  clock-free helpers in `packages/shared/src/analytics/periods.ts`.
+- **Currency.** Each response is about exactly one currency: the requested one, otherwise the
+  user's preferred currency if they hold an account in it, otherwise their first account currency.
+  `currencies` lists the ones they hold (preferred first) so the UI can offer a switch. Amounts are
+  never added or converted across currencies. The financial position is the exception: it is the
+  accounts module's per-currency summary, returned as is.
+- **Contracts.** DTOs in `packages/shared/src/types/dashboard.ts`, Zod mirrors in
+  `schemas/dashboard.ts`. Money is a minor-unit string; ratios (savings rate, changes, shares) are
+  `RatioDto`, a discriminated union of `{ status: 'available', basisPoints }` and
+  `{ status: 'unavailable', reason }`, so "no income" can never be mistaken for 0 %. Basis points are
+  canonical integer strings without the BIGINT bound (a tiny income against a large spend gives a
+  very large negative rate). The comparison is `available` or `unavailable` with
+  `no_previous_activity`.
+- **Boundary.** The caller's `preferredCurrency` joins `userId` and `timeZone` on `Caller`
+  (`lib/auth-boundary.ts`). The financial position comes from the accounts service's `summary`,
+  built once in the composition root (`routes/v1.ts`) and handed to the dashboard router, so the
+  dashboard never re-implements balance rules or imports accounts internals.
+- **Layout.** `dashboard.routes.ts` · `dashboard.controller.ts` · `dashboard.service.ts` (resolves
+  the period and currency once per request, then runs the independent queries in parallel) ·
+  `dashboard-metrics.ts` (pure: range resolution, currency choice, ratios, comparison, trend
+  filling, category ranking) · `dashboard.repository.ts` (raw aggregate SQL; rows parsed with Zod).
+- **Consistency.** Each response is computed from its own queries; the overview's current and
+  previous totals come from one query, so they share a snapshot. The three endpoints are separate
+  requests, so a write between them can show in one section before another — the next load agrees.
