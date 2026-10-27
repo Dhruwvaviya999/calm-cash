@@ -5,17 +5,10 @@ import {
   type AccountDto,
 } from '@calmcash/shared';
 
+import { toIsoDate } from '../../lib/calendar-dates';
 import type { AccountRecord } from './accounts.repository';
 
-/** `YYYY-MM-DD` of a PostgreSQL `date` column (Prisma returns it as UTC midnight). */
-export function toIsoDate(value: Date): string {
-  return value.toISOString().slice(0, 10);
-}
-
-/** UTC midnight of a `YYYY-MM-DD` calendar date, for a `date` column. */
-export function fromIsoDate(value: string): Date {
-  return new Date(`${value}T00:00:00.000Z`);
-}
+export { fromIsoDate, toIsoDate } from '../../lib/calendar-dates';
 
 /** Database account → public DTO, field by field; nothing else about the row is exposed. */
 export function toAccountDto(account: AccountRecord): AccountDto {

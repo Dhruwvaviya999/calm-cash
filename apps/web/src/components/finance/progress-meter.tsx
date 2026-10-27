@@ -17,11 +17,22 @@ export interface ProgressMeterProps {
   /** Accessible name, e.g. "Groceries budget used". */
   label: string;
   tone: ProgressTone;
+  /** Spoken value; defaults to "{percent}% used". Pass the exact figure when it exceeds 100 %. */
+  valueText?: string;
+  /** Marks on the track (percent of the full bar), e.g. alert thresholds. Decorative. */
+  marks?: readonly number[];
   className?: string;
 }
 
 /** A thin, accessible progress bar for budgets and goals. */
-export function ProgressMeter({ percent, label, tone, className }: ProgressMeterProps): ReactNode {
+export function ProgressMeter({
+  percent,
+  label,
+  tone,
+  valueText,
+  marks = [],
+  className,
+}: ProgressMeterProps): ReactNode {
   const clamped = Math.min(Math.max(percent, 0), 100);
   return (
     <div
@@ -29,9 +40,9 @@ export function ProgressMeter({ percent, label, tone, className }: ProgressMeter
       aria-label={label}
       aria-valuemin={0}
       aria-valuemax={100}
-      aria-valuenow={clamped}
-      aria-valuetext={`${percent}% used`}
-      className={cn('h-2 w-full overflow-hidden rounded-full bg-muted', className)}
+      aria-valuenow={Math.round(clamped)}
+      aria-valuetext={valueText ?? `${percent}% used`}
+      className={cn('relative h-2 w-full overflow-hidden rounded-full bg-muted', className)}
     >
       <div
         className={cn(
@@ -40,6 +51,14 @@ export function ProgressMeter({ percent, label, tone, className }: ProgressMeter
         )}
         style={{ width: `${clamped}%` }}
       />
+      {marks.map((mark) => (
+        <span
+          key={mark}
+          aria-hidden="true"
+          className="absolute inset-y-0 w-px bg-background/80"
+          style={{ left: `${Math.min(Math.max(mark, 0), 100)}%` }}
+        />
+      ))}
     </div>
   );
 }

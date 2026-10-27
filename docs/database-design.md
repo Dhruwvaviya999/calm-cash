@@ -4,7 +4,8 @@ PostgreSQL is the system of record. The schema is defined in
 [`prisma/schema.prisma`](../prisma/schema.prisma); the authoritative DDL — including the CHECK
 constraints Prisma cannot express — is in [`prisma/migrations/`](../prisma/migrations/).
 This document covers the Phase 1 core models, the Phase 3 authentication models, the Phase 4
-account-management rules (§3a), and the Phase 5 transaction ledger (§3b).
+account-management rules (§3a), the Phase 5 transaction ledger (§3b), the Phase 6 dashboard
+metrics (§3c), and the Phase 7 planning models (§3d).
 
 ## 1. Entity relationships
 
@@ -21,6 +22,13 @@ erDiagram
     categories |o--o{ categories : "parent (parent_id)"
     categories |o--o{ transactions : classifies
     categories |o--o{ budgets : scopes
+    users ||--o{ recurring_schedules : plans
+    accounts |o--o{ recurring_schedules : "usual account"
+    categories |o--o{ recurring_schedules : classifies
+    recurring_schedules ||--o{ scheduled_occurrences : "acted-on dates"
+    transactions |o--o| scheduled_occurrences : "recorded as"
+    users ||--o{ savings_goals : "saves for"
+    savings_goals ||--o{ goal_contributions : "allocations"
 
     users {
         uuid id PK
@@ -100,20 +108,67 @@ erDiagram
         budget_period period
         date start_date
         date end_date "nullable"
+        int_array alert_thresholds_bp "max 3"
+        timestamptz archived_at "nullable"
+    }
+    recurring_schedules {
+        uuid id PK
+        uuid user_id FK
+        transaction_type type "income or expense"
+        bigint amount_minor "positive"
+        char currency
+        uuid account_id FK "nullable"
+        uuid category_id FK "nullable"
+        recurring_frequency frequency
+        smallint interval
+        date start_date "anchor"
+        date end_date "nullable"
+        date next_occurrence_date "cursor"
+        boolean is_subscription
+        timestamptz paused_at "nullable"
+        timestamptz cancelled_at "subscriptions"
+        timestamptz archived_at "nullable"
+    }
+    scheduled_occurrences {
+        uuid id PK
+        uuid schedule_id FK
+        date scheduled_date "unique per schedule"
+        date due_date ">= scheduled_date"
+        occurrence_state state
+        uuid transaction_id FK "unique, recorded only"
+    }
+    savings_goals {
+        uuid id PK
+        uuid user_id FK
+        bigint target_minor "positive"
+        char currency
+        date target_date "nullable"
+        timestamptz completed_at "nullable"
+        timestamptz archived_at "nullable"
+    }
+    goal_contributions {
+        uuid id PK
+        uuid goal_id FK
+        bigint amount_minor "signed, not zero"
+        date contributed_on
     }
 ```
 
 Every table also has `created_at` and `updated_at` (`timestamptz(3)`).
 
-| Model         | Purpose                                                                                         |
-| ------------- | ----------------------------------------------------------------------------------------------- |
-| `User`        | Owner of all data. Preferred currency and IANA time zone drive defaults and reporting.          |
-| `Account`     | A place money lives (cash, bank, savings, wallet) or a debt (credit card); see §3a.             |
-| `Category`    | Income or expense label, two levels deep; defaults provisioned per user (§3b).                  |
-| `Transaction` | One income, expense, transfer, or balance adjustment (§3b).                                     |
-| `Budget`      | A spending limit per period, for one category or all expenses.                                  |
-| `Session`     | A browser session: hashed cookie token, hashed CSRF token, lifetime, revocation (Phase 3).      |
-| `AuthToken`   | A single-use e-mailed token for e-mail verification or password reset, stored hashed (Phase 3). |
+| Model                 | Purpose                                                                                         |
+| --------------------- | ----------------------------------------------------------------------------------------------- |
+| `User`                | Owner of all data. Preferred currency and IANA time zone drive defaults and reporting.          |
+| `Account`             | A place money lives (cash, bank, savings, wallet) or a debt (credit card); see §3a.             |
+| `Category`            | Income or expense label, two levels deep; defaults provisioned per user (§3b).                  |
+| `Transaction`         | One income, expense, transfer, or balance adjustment (§3b).                                     |
+| `Budget`              | A spending limit per period, for one category or all expenses (§3d).                            |
+| `RecurringSchedule`   | A rule for expected income or spending; subscriptions are flagged schedules (§3d).              |
+| `ScheduledOccurrence` | One occurrence a person acted on: recorded, skipped, postponed, or passed over (§3d).           |
+| `SavingsGoal`         | A target to save towards; progress is the sum of its contributions (§3d).                       |
+| `GoalContribution`    | A planning allocation towards a goal; never a transaction (§3d).                                |
+| `Session`             | A browser session: hashed cookie token, hashed CSRF token, lifetime, revocation (Phase 3).      |
+| `AuthToken`           | A single-use e-mailed token for e-mail verification or password reset, stored hashed (Phase 3). |
 
 ### Refinements to the initial contracts
 
@@ -467,37 +522,170 @@ two-window totals query use a bitmap scan of `transactions_user_id_occurred_at_i
 as index conditions, in 5–8 ms. No new index is needed; a covering index can be considered if
 very long histories make the heap reads dominant.
 
+## 3d. Budgets, recurring schedules, subscriptions, and goals (Phase 7)
+
+Phase 7 adds planning on top of the ledger. Nothing in it changes how balances or cash flow are
+calculated, and none of it stores a running total that could drift from the transactions.
+
+### Budgets: periods
+
+| `period`    | Period shown for a reference date (user's time zone)        |
+| ----------- | ----------------------------------------------------------- |
+| `weekly`    | The ISO week (Monday–Sunday) containing it                  |
+| `monthly`   | The calendar month containing it (never "30 days")          |
+| `quarterly` | The calendar quarter (Jan, Apr, Jul, Oct) containing it     |
+| `yearly`    | The calendar year containing it                             |
+| `custom`    | Always its one range, `start_date` to `end_date` (required) |
+
+A recurring budget continues every period until its optional `end_date`. The shown period is
+clipped to `start_date` and `end_date` (flagged `partial`); before the budget starts it shows its
+first period (`timing: upcoming`, status `not_applicable`), after it ends its last one
+(`timing: ended`, so final results stay visible). The reference date is today unless `?date=` is
+given. `budgetWindow` and `budgetPeriodContaining` in `packages/shared/src/planning` are the single
+definition, unit-tested for month ends and leap years.
+
+### Budgets: actual spending
+
+Spending is aggregated from `transactions` on every read (`BudgetsRepository.spending`):
+
+- the owner's rows in the budget's **currency** only (never converted or added across currencies);
+- `type = 'expense'` and `voided_at IS NULL` — income, transfers, balance adjustments, and voided
+  rows never count; credit-card expenses count like any other expense (spending is not a balance
+  change, so balances are never compared);
+- `occurred_at` in `[start of from, start of the day after to)` in the user's time zone, exactly as
+  the dashboard's `cashFlowScope`;
+- **category roll-up**: a budget on a top-level category counts expenses in that category and its
+  subcategories; a budget on a subcategory counts only that subcategory. Every expense has one
+  category, so it is counted once per budget. An overall budget (`category_id` NULL) counts every
+  expense in the currency, uncategorised legacy rows included.
+
+Archived categories keep counting for the budgets that use them (history); new budgets cannot pick
+an archived or income category. Edits, voids, restores, and category changes of transactions are
+reflected immediately because nothing is cached.
+
+### Budgets: progress and status
+
+- `remaining = limit − spent` (negative when overspent, never clamped).
+- `used = spent ÷ limit` in basis points, rounded half away from zero only for the reported figure
+  and uncapped (125 % is 12 500 bp). Without a positive limit it is `unavailable` (`no_limit`).
+- Alert thresholds (`alert_thresholds_bp`): up to three, strictly ascending, 1 %–99 % (CHECK
+  constraint for count and range; order by the API). Default `[8000]`; `[]` turns early alerts off.
+- Status, decided by **exact** comparisons (79.996 % has not reached an 80 % alert):
+  `over_budget` (spent > limit), `limit_reached` (spent = limit), `approaching_limit` (spent ≥ a
+  threshold), `on_track`, and `not_applicable` (period not started). Alerts are derived on every
+  read, never stored or sent, so repeated page loads cannot create duplicate alerts.
+- **No double counting in totals.** One active budget per scope, currency, and period may cover a
+  given day (overlaps are refused with `409`, checked under a per-user advisory lock). Summary totals
+  per cadence use the overall budget when one exists, otherwise the category budgets except a
+  subcategory budget whose parent is also budgeted — the remaining scopes are disjoint. Custom
+  budgets appear in status counts but not in cadence totals.
+
+### Recurring schedules and occurrences
+
+A schedule is a rule (`frequency` × `interval` from `start_date`), not money. Dates are calendar
+dates in the user's time zone, so daylight-saving changes cannot move them.
+
+- **Month ends.** Every occurrence is computed from the anchor date: a schedule on the 31st falls on
+  the last day of shorter months (28/29 Feb, 30 Apr) and returns to the 31st afterwards; 29 February
+  falls on 28 February in common years. A date never rolls into the next month.
+- **Identity.** An occurrence is identified by its schedule and **scheduled date**. Only
+  occurrences someone acted on are stored (`scheduled_occurrences`, unique on
+  `(schedule_id, scheduled_date)`); every other date of the rule is pending. A postponed occurrence
+  keeps its scheduled date and gets a later `due_date`.
+- **States.** Stored: `postponed`, `recorded` (with a unique `transaction_id`), `skipped`, `paused`
+  (fell while the schedule was paused). Shown: `upcoming`, `due` (today), `overdue`, `recorded`,
+  `skipped`, `paused`; pending ones also report `postponed` and `dueSoon` (within `reminder_days`).
+- **Cursor.** `next_occurrence_date` is the earliest occurrence from `start_date` that no row
+  resolves; it is recomputed under the schedule's row lock after every change. Rows before the
+  start date are history from an earlier timing.
+- **Recording** (`…/occurrences/:date/record`), all in one database transaction: lock the schedule
+  row; if the occurrence is already recorded, return its transaction (200, nothing written); refuse
+  skipped ones (409 — "Expect it after all" first) and schedules changed since they were read;
+  record the transaction through the transactions module (account locks, ownership, archived
+  accounts refused, date rules, category kind, and the cash/savings/wallet non-negative rule); store
+  the occurrence as `recorded`; advance the cursor. Any failure rolls everything back. Concurrent
+  confirmations queue on the schedule lock and the later ones see the first transaction; the unique
+  indexes on `(schedule_id, scheduled_date)` and `transaction_id` are the last line of defence.
+  Integration tests fire six simultaneous confirmations (one 201, five 200, one transaction) and
+  inject a failure after the transaction insert (nothing remains).
+- **Voiding** a recorded transaction keeps the occurrence recorded (with `transactionStatus:
+voided`); restoring the transaction is the way back, so one cycle can never hold two active
+  transactions.
+- **Skip / unskip / postpone.** Skipping stores `skipped` (idempotent); unskip removes it;
+  postponing moves the due date later (at most a year after the scheduled date). Actions reach at
+  most a year ahead.
+- **Pause / resume.** While paused nothing is expected. On resume, occurrences whose scheduled date
+  fell from the pause day up to yesterday are stored as `paused` (not owed); ones already overdue
+  before the pause stay expected.
+- **Edits.** Amount, account, category, and texts apply to every occurrence not yet recorded;
+  recorded transactions never change. A timing change (`frequency`, `interval`, `start_date`)
+  restarts the schedule from the new start date, which must come after every recorded or skipped
+  occurrence; postponed rows are dropped. `end` sets the last date (not before recorded history)
+  and drops later postponements; a schedule with nothing left to expect is `completed`.
+- **No scheduler.** Due and overdue states are derived per request from persisted rules; nothing
+  is recorded automatically and no notification is sent (Phase 9).
+
+### Subscriptions
+
+A subscription is a recurring **expense** schedule with `is_subscription = true` (CHECK), so it
+uses the same recurrence, occurrences, and recording. A subscription can exist without an account
+(tracked only; the account is chosen when a charge is recorded). Cancelling sets `cancelled_at` and
+an `end_date` (default today; CHECK requires it): charges due up to that date stay expected,
+nothing after it is, and recorded charges are untouched. Estimates multiply the expected amount by
+the number of pending occurrences in a window (next 30 days, next twelve months) per currency; they
+are labelled as estimates and never presented as spending. Nothing is detected automatically.
+
+### Savings goals
+
+- Progress is `saved = Σ goal_contributions.amount_minor` (never negative — enforced under the
+  goal's row lock), `remaining = target − saved` (negative once exceeded), and `percent = saved ÷
+target` in basis points, uncapped (`no_target` when unavailable). With a target date the API adds
+  days remaining and the monthly amount needed (rounded up).
+- Contributions are **planning allocations**: they move no money, touch no account or
+  transaction, and are not part of the dashboard's savings rate (a cash-flow ratio). Linking a
+  contribution to a real transaction is not supported in this phase.
+- `completed_at` is set by the person ("Mark completed"), independent of reaching the target;
+  archived goals keep their history. A goal's currency is fixed once it has contributions.
+
 ## 4. Integrity rules
 
 ### Constraints
 
-| Table          | Constraint                                                             | Rule                                                                           |
-| -------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `users`        | `users_email_key` (unique)                                             | One account per e-mail address.                                                |
-| `users`        | `users_email_lowercase_check`                                          | E-mail stored lower-case, so uniqueness is case-insensitive.                   |
-| `users`        | `users_password_hash_format_check`                                     | A stored password is always an Argon2id PHC string.                            |
-| `sessions`     | `sessions_token_hash_key` (unique)                                     | One session per token hash.                                                    |
-| `sessions`     | `sessions_*_hash_format_check`                                         | Token and CSRF hashes are 64 lower-case hex characters.                        |
-| `sessions`     | `sessions_expiry_after_creation_check`                                 | `expires_at > created_at`.                                                     |
-| `auth_tokens`  | `auth_tokens_token_hash_key` (unique)                                  | One token per hash; looked up by hash on consumption.                          |
-| `auth_tokens`  | `auth_tokens_token_hash_format_check`, `…_expiry_after_creation_check` | Hex digest; coherent lifetime.                                                 |
-| `accounts`     | `accounts_credit_limit_check`                                          | `credit_limit_minor` is null, or positive on a `credit_card`.                  |
-| `accounts`     | `accounts_institution_not_blank_check`                                 | A provider name, if present, is not blank.                                     |
-| `accounts`     | `accounts_opening_balance_date_check`                                  | `opening_balance_date >= 1900-01-01`.                                          |
-| `accounts`     | `accounts_archived_after_creation_check`                               | `archived_at` is null or not before `created_at`.                              |
-| `categories`   | `categories_user_id_kind_name_key` (unique)                            | Category names are unique per user and kind.                                   |
-| `transactions` | `transactions_amount_minor_positive_check`                             | `amount_minor > 0`.                                                            |
-| `transactions` | `transactions_transfer_shape_check`                                    | Transfers: destination present, ≠ source, no category. Others: no destination. |
-| `transactions` | `transactions_adjustment_shape_check`                                  | Direction iff adjustment; adjustments have no category, merchant, or method.   |
-| `transactions` | `transactions_tags_check`                                              | At most 10 tags, none null.                                                    |
-| `transactions` | `transactions_void_check`, `…_void_reason_not_blank_check`             | A reason only on voided rows; never voided before it was created.              |
-| `transactions` | `transactions_user_id_idempotency_key_key` (unique)                    | One transaction per user and idempotency key.                                  |
-| `categories`   | `categories_parent_not_self_check`, `…_archived_after_creation_check`  | No self-parent; archived not before created.                                   |
-| `budgets`      | `budgets_limit_minor_positive_check`                                   | `limit_minor > 0`.                                                             |
-| `budgets`      | `budgets_date_range_check`                                             | `end_date` is null or ≥ `start_date`.                                          |
-| `budgets`      | `budgets_custom_period_end_date_check`                                 | `custom` periods require an `end_date`.                                        |
-| all            | `*_currency_format_check`                                              | `currency ~ '^[A-Z]{3}$'`.                                                     |
-| all            | `*_name_not_blank_check` / `*_description_not_blank_check`             | Text identifiers cannot be blank.                                              |
+| Table                   | Constraint                                                             | Rule                                                                            |
+| ----------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `users`                 | `users_email_key` (unique)                                             | One account per e-mail address.                                                 |
+| `users`                 | `users_email_lowercase_check`                                          | E-mail stored lower-case, so uniqueness is case-insensitive.                    |
+| `users`                 | `users_password_hash_format_check`                                     | A stored password is always an Argon2id PHC string.                             |
+| `sessions`              | `sessions_token_hash_key` (unique)                                     | One session per token hash.                                                     |
+| `sessions`              | `sessions_*_hash_format_check`                                         | Token and CSRF hashes are 64 lower-case hex characters.                         |
+| `sessions`              | `sessions_expiry_after_creation_check`                                 | `expires_at > created_at`.                                                      |
+| `auth_tokens`           | `auth_tokens_token_hash_key` (unique)                                  | One token per hash; looked up by hash on consumption.                           |
+| `auth_tokens`           | `auth_tokens_token_hash_format_check`, `…_expiry_after_creation_check` | Hex digest; coherent lifetime.                                                  |
+| `accounts`              | `accounts_credit_limit_check`                                          | `credit_limit_minor` is null, or positive on a `credit_card`.                   |
+| `accounts`              | `accounts_institution_not_blank_check`                                 | A provider name, if present, is not blank.                                      |
+| `accounts`              | `accounts_opening_balance_date_check`                                  | `opening_balance_date >= 1900-01-01`.                                           |
+| `accounts`              | `accounts_archived_after_creation_check`                               | `archived_at` is null or not before `created_at`.                               |
+| `categories`            | `categories_user_id_kind_name_key` (unique)                            | Category names are unique per user and kind.                                    |
+| `transactions`          | `transactions_amount_minor_positive_check`                             | `amount_minor > 0`.                                                             |
+| `transactions`          | `transactions_transfer_shape_check`                                    | Transfers: destination present, ≠ source, no category. Others: no destination.  |
+| `transactions`          | `transactions_adjustment_shape_check`                                  | Direction iff adjustment; adjustments have no category, merchant, or method.    |
+| `transactions`          | `transactions_tags_check`                                              | At most 10 tags, none null.                                                     |
+| `transactions`          | `transactions_void_check`, `…_void_reason_not_blank_check`             | A reason only on voided rows; never voided before it was created.               |
+| `transactions`          | `transactions_user_id_idempotency_key_key` (unique)                    | One transaction per user and idempotency key.                                   |
+| `categories`            | `categories_parent_not_self_check`, `…_archived_after_creation_check`  | No self-parent; archived not before created.                                    |
+| `budgets`               | `budgets_limit_minor_positive_check`                                   | `limit_minor > 0`.                                                              |
+| `budgets`               | `budgets_date_range_check`                                             | `end_date` is null or ≥ `start_date`.                                           |
+| `budgets`               | `budgets_custom_period_end_date_check`                                 | `custom` periods require an `end_date`.                                         |
+| `budgets`               | `budgets_alert_thresholds_check`                                       | At most 3 thresholds, none null, each 100–9900 bp.                              |
+| `recurring_schedules`   | `…_type_check`, `…_amount_minor_positive_check`, `…_interval_check`    | Income or expense only; positive amount; interval 1–52.                         |
+| `recurring_schedules`   | `…_subscription_check`                                                 | Subscriptions are expenses; only subscriptions are cancelled, with an end date. |
+| `recurring_schedules`   | `…_date_range_check`, `…_cursor_check`, `…_lifecycle_check`            | Coherent dates and cursor; paused/archived/cancelled not before creation.       |
+| `scheduled_occurrences` | unique `(schedule_id, scheduled_date)`, unique `transaction_id`        | One row per cycle; one occurrence per transaction.                              |
+| `scheduled_occurrences` | `…_due_date_check`, `…_state_check`                                    | Due date never earlier; transaction iff recorded; resolved time iff resolved.   |
+| `savings_goals`         | `…_target_minor_positive_check`, `…_lifecycle_check`                   | Positive target; lifecycle times not before creation.                           |
+| `goal_contributions`    | `…_amount_minor_not_zero_check`                                        | A contribution always changes the tracked amount.                               |
+| all                     | `*_currency_format_check`                                              | `currency ~ '^[A-Z]{3}$'`.                                                      |
+| all                     | `*_name_not_blank_check` / `*_description_not_blank_check`             | Text identifiers cannot be blank.                                               |
 
 Type-dependent balance rules (no negative cash, savings, or wallet balances) are enforced by the
 shared `accountRuleViolations` on every account create and update, and on every transaction write
@@ -514,14 +702,18 @@ line of defence against a buggy code path or a manual query.
 
 ### Foreign keys and deletion behaviour
 
-| Reference                                     | On delete   | Why                                                                      |
-| --------------------------------------------- | ----------- | ------------------------------------------------------------------------ |
-| `*.user_id → users`                           | `CASCADE`   | Deleting a user removes all of their data.                               |
-| `transactions.account_id → accounts`          | `NO ACTION` | An account with history cannot be deleted directly (archive it instead). |
-| `transactions.transfer_account_id → accounts` | `NO ACTION` | Same as above for transfer destinations.                                 |
-| `transactions.category_id → categories`       | `SET NULL`  | Deleting a category un-categorises its transactions; amounts are kept.   |
-| `categories.parent_id → categories`           | `NO ACTION` | A category with subcategories cannot be deleted from under them.         |
-| `budgets.category_id → categories`            | `NO ACTION` | Prevents silently widening a budget to "all categories".                 |
+| Reference                                     | On delete   | Why                                                                        |
+| --------------------------------------------- | ----------- | -------------------------------------------------------------------------- |
+| `*.user_id → users`                           | `CASCADE`   | Deleting a user removes all of their data.                                 |
+| `transactions.account_id → accounts`          | `NO ACTION` | An account with history cannot be deleted directly (archive it instead).   |
+| `transactions.transfer_account_id → accounts` | `NO ACTION` | Same as above for transfer destinations.                                   |
+| `transactions.category_id → categories`       | `SET NULL`  | Deleting a category un-categorises its transactions; amounts are kept.     |
+| `categories.parent_id → categories`           | `NO ACTION` | A category with subcategories cannot be deleted from under them.           |
+| `budgets.category_id → categories`            | `NO ACTION` | Prevents silently widening a budget to "all categories".                   |
+| `recurring_schedules.account_id/category_id`  | `NO ACTION` | Accounts and categories are archived, never deleted, while plans use them. |
+| `scheduled_occurrences.schedule_id`           | `CASCADE`   | An occurrence has no meaning without its schedule (never orphaned).        |
+| `scheduled_occurrences.transaction_id`        | `NO ACTION` | Transactions are voided, never deleted.                                    |
+| `goal_contributions.goal_id`                  | `CASCADE`   | Contributions belong to their goal (goals are archived, not deleted).      |
 
 `NO ACTION` is used instead of `RESTRICT` on purpose. The check runs at the end of the statement,
 so deleting a user, which cascades to both transactions and accounts, still succeeds, while
@@ -544,21 +736,26 @@ database level later if needed.
   user's `timezone`.
 - **Indexes:**
 
-  | Index                                               | Serves                                              |
-  | --------------------------------------------------- | --------------------------------------------------- |
-  | `transactions (user_id, occurred_at DESC)`          | A user's timeline, newest first; dashboard periods. |
-  | `transactions (account_id, occurred_at DESC)`       | An account ledger; balance calculation.             |
-  | `transactions (transfer_account_id)`                | Incoming transfers for an account's balance.        |
-  | `transactions (category_id)`                        | Category reports and `ON DELETE SET NULL`.          |
-  | `budgets (user_id)`, `budgets (category_id)`        | A user's budgets; FK checks.                        |
-  | `sessions (user_id)`                                | A user's sessions (list, revoke others).            |
-  | `sessions (expires_at)`, `auth_tokens (expires_at)` | Cleanup of ended records.                           |
-  | `auth_tokens (user_id, purpose)`                    | Replacing a user's outstanding tokens.              |
-  | `accounts (user_id, archived_at)`                   | A user's accounts, filtered by status (Phase 4).    |
-  | `transactions USING GIN (tags)`                     | Tag filters and search (Phase 5).                   |
-  | unique `transactions (user_id, idempotency_key)`    | Retried creates find their first row (Phase 5).     |
-  | `categories (parent_id)`                            | Subcategories; category filters include children.   |
-  | unique `categories (user_id, kind, name)`           | Also serves "categories of a user".                 |
+  | Index                                                        | Serves                                              |
+  | ------------------------------------------------------------ | --------------------------------------------------- |
+  | `transactions (user_id, occurred_at DESC)`                   | A user's timeline, newest first; dashboard periods. |
+  | `transactions (account_id, occurred_at DESC)`                | An account ledger; balance calculation.             |
+  | `transactions (transfer_account_id)`                         | Incoming transfers for an account's balance.        |
+  | `transactions (category_id)`                                 | Category reports and `ON DELETE SET NULL`.          |
+  | `budgets (user_id)`, `budgets (category_id)`                 | A user's budgets; FK checks.                        |
+  | `sessions (user_id)`                                         | A user's sessions (list, revoke others).            |
+  | `sessions (expires_at)`, `auth_tokens (expires_at)`          | Cleanup of ended records.                           |
+  | `auth_tokens (user_id, purpose)`                             | Replacing a user's outstanding tokens.              |
+  | `accounts (user_id, archived_at)`                            | A user's accounts, filtered by status (Phase 4).    |
+  | `transactions USING GIN (tags)`                              | Tag filters and search (Phase 5).                   |
+  | unique `transactions (user_id, idempotency_key)`             | Retried creates find their first row (Phase 5).     |
+  | `categories (parent_id)`                                     | Subcategories; category filters include children.   |
+  | `recurring_schedules (user_id, archived_at)`                 | A user's schedules by status (Phase 7).             |
+  | unique `scheduled_occurrences (schedule_id, scheduled_date)` | Occurrence identity; a schedule's rows.             |
+  | `scheduled_occurrences (user_id, due_date)`                  | A user's occurrences by due date.                   |
+  | `savings_goals (user_id, archived_at)`                       | A user's goals by status.                           |
+  | `goal_contributions (goal_id, contributed_on)`               | A goal's history and its tracked total.             |
+  | unique `categories (user_id, kind, name)`                    | Also serves "categories of a user".                 |
 
   Search (`q`) uses case-insensitive `LIKE` on description, merchant, notes, and category names,
   scoped by `user_id` (a personal ledger is small); wildcards in the search text are escaped. A
@@ -610,6 +807,12 @@ literal unions are identical, both at runtime and at the type level.
   CHECK constraints (which only concern new columns or the new type, so no existing row can fail).
   They were applied with `prisma migrate deploy`; no data was reset.
 - **Phase 6** has no migration: the dashboard only reads existing tables through existing indexes.
+- **Phase 7 migration** (`*_planning`) is additive: two enums (`recurring_frequency`,
+  `occurrence_state`); three nullable or defaulted `budgets` columns (`description`,
+  `alert_thresholds_bp` default `{8000}`, `archived_at`), so existing budgets stay active with the
+  default alert; four new tables with their indexes, foreign keys, and CHECK constraints. Nothing
+  existing is altered or dropped. Applied with `prisma migrate dev`; the drift check reports no
+  difference.
 - **Check for drift:**
   `pnpm exec prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code`
   exits with 0 when the database matches the schema.

@@ -165,6 +165,8 @@ export interface TransactionFilterQuery {
   accountId?: EntityId;
   /** Matches the category and its subcategories. */
   categoryId?: EntityId;
+  /** Only transactions in this currency (e.g. a budget's drill-down). */
+  currency?: CurrencyCode;
   paymentMethod?: PaymentMethod;
   /** Transactions carrying all of these tags. */
   tags?: string[];

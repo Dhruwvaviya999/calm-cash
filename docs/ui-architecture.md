@@ -4,7 +4,8 @@ How the web app (`apps/web`) is designed and built: the visual identity, design 
 responsive application shell, the component system, and the rules that let later phases replace
 prototype screens without rewriting the shell. Established in Phase 2; Phase 3 added the
 authentication pages, route protection, and real account settings; Phase 4 made Accounts live;
-Phase 5 made Transactions live (§7b).
+Phase 5 made Transactions live (§7b); Phase 6 the dashboard (§7c); Phase 7 Budgets & planning
+(§7d).
 
 ## 1. Design principles
 
@@ -154,7 +155,11 @@ Feature modules (`features/<feature>/`, public API in `index.ts`):
 | Feature         | Contents                                                                                                                                                                                                                                                                              |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `transactions`  | `TransactionsPage` (live page), `TransactionRow`, `TransactionList`, `TransactionHistory` (table + phone rows), forms (`TransactionForm`, `ReconcileForm`), sheets (entry, details, filters, bulk, categories), `transaction-form-model.ts`, `transaction-filters.ts` (URL ⇄ filters) |
-| `budgets`       | `BudgetProgress`, `getBudgetStatus` (on track / close to limit / over budget)                                                                                                                                                                                                         |
+| `budgets`       | `BudgetsOverview` (live section), `BudgetProgress`, `BudgetTotals`, `BudgetStatusCounts`, `BudgetForm`, `BudgetDetailsSheet`; `budget-form-model.ts`, `budget-presentation.ts` (statuses, drill-down links)                                                                           |
+| `recurring`     | `RecurringOverview` (coming up, calendar, schedules), `OccurrenceList`/`OccurrenceRow`, `BillCalendar`, `ScheduleForm` (also subscriptions), `RecordOccurrenceForm`, `PostponeForm`, `ScheduleDetailsSheet`; `useOccurrenceActions`, `usePlanningReferences`                          |
+| `subscriptions` | `SubscriptionsOverview` (estimates, cancel, record a charge through the recurring actions)                                                                                                                                                                                            |
+| `goals`         | `GoalsOverview`, `GoalProgress`, goal form and details with contributions                                                                                                                                                                                                             |
+| `planning`      | `PlanningPage`: the `/budgets` hub with `SectionTabs` (`?section=`)                                                                                                                                                                                                                   |
 | `accounts`      | `AccountsOverview` (live page), `AccountCard`, `AccountBalance`, `AccountsSummary`, `AccountForm`/`AccountFormSheet`, `AccountDetailsSheet`; `account-form-model.ts` (text ⇄ exact minor units)                                                                                       |
 | `dashboard`     | `DashboardPage` (live page), `DashboardControls`, sections (`FinancialPosition`, `PeriodSummary`, `RecentActivity`), `CashFlowChart`, `SpendingChart`; `dashboard-selection.ts` (URL ⇄ period and currency)                                                                           |
 | `auth`          | `AuthProvider`/`useAuth` (session lifecycle), `RequireAuth`, `GuestOnly`, `LoginForm`, `RegisterForm`, `ForgotPasswordForm`, `ResetPasswordForm`, `VerifyEmailPanel`, `UserMenu`, `PasswordRequirements`                                                                              |
@@ -189,7 +194,7 @@ still prerenders).
 | `/`                | Temporary (307) redirect to `/dashboard` (which sends signed-out visitors to `/login`).                                                                                       |
 | `/dashboard`       | **Live data** (§7c). Position, period summary, cash-flow trend, spending by category, recent activity; `?period=`, `?from=&to=`, `?currency=` in the URL.                     |
 | `/transactions`    | **Live data** (§7b). Record, search, filter, edit, void, restore, bulk-edit, and reconcile; filters in the URL; `?reconcile=<id>`, `?new=1`, `?transaction=<id>` open sheets. |
-| `/budgets`         | Upcoming-feature state and sample budget progress cards.                                                                                                                      |
+| `/budgets`         | **Live data** (§7d). Budgets & planning: `?section=budgets` (default), `recurring`, `subscriptions`, `goals`.                                                                 |
 | `/accounts`        | **Live data.** Totals per currency (held vs. owed), accounts grouped by classification, active/archived filter, add/edit sheet, details sheet, archive and restore.           |
 | `/insights`        | Upcoming-feature state and what to expect (no generated insights).                                                                                                            |
 | `/settings`        | Profile (name, currency, time zone), password change, signed-in devices, theme, preference reset, diagnostics.                                                                |
@@ -303,26 +308,62 @@ the `(auth)` pages are public, and `/login` and `/register` send signed-in users
   period, because the transaction filters cannot express "not these categories".
 - **Recent activity.** The six newest active transactions in every currency, as `TransactionRow`s,
   each opening its details on the Transactions page (`?transaction=<id>`).
-- **Budgets** are not shown: they arrive with their own phase, so the dashboard has no placeholder
-  budget figures.
+- **Planning previews (Phase 7).** Three independent cards below the activity: _Budgets_ (current
+  monthly totals, status counts, the budgets furthest through their limit), _Coming up_ (overdue and
+  the next 14 days, labelled as expected and not yet recorded), and _Savings goals_ (tracked
+  amounts, explicitly not the savings rate). Each loads, fails, and retries on its own and links to
+  its planning section; with nothing set up it says so instead of showing figures.
 - Charts render at 320px without horizontal scrolling; long category names truncate with the full
   name in the tooltip and the table.
 
+## 7d. Budgets & planning (Phase 7)
+
+- **One page, four sections.** `/budgets` keeps its navigation slot ("Budgets" in every nav
+  surface) and hosts `PlanningPage`: a `PageHeader` and `SectionTabs` (links with
+  `aria-current="page"`, one URL per section via `?section=`). Each section is its own feature with
+  its own `<h2>`, actions, loading skeleton, error with retry, and empty state.
+- **Budgets.** A month switcher (weekly and yearly budgets show the week or year containing the
+  chosen day), a currency select only when budgets exist in several currencies, Active/Archived.
+  Totals per cadence ("This month: Budgeted · Spent · Left/Over") never add nested budgets twice
+  and say so. Cards show name, scope, status badge (icon + text), a meter with alert marks
+  (`aria-valuetext` gives the exact, uncapped percentage), spent of limit, and "left" or "over" in
+  words. "Expenses" opens Transactions filtered to exactly the budget's scope
+  (`type=expense&currency=…&from=…&to=…&categoryId=…`; the category filter includes
+  subcategories). Details show the latest expenses through the same query. The form asks for scope,
+  category, name, limit, and period; dates, currency, alerts, and a note sit behind "Dates,
+  currency, and alerts" with sensible defaults (monthly from the 1st, 80 % alert).
+- **Bills & recurring.** _Coming up_: expected totals per currency (labelled as plans), overdue
+  first, then the next 30 days. _Calendar_: a Monday-first month grid of day buttons (accessible
+  names such as "5 October 2026, 1 payment, 1 overdue"; dots repeat the meaning in a legend) with
+  the selected day's payments below. _All schedules_: cards with rhythm in words ("Every month on
+  the 31st (or the month's last day)") and status. Rows show "Expected" before pending amounts and
+  a status badge; "Record" opens a sheet that states it records real money, preselects the
+  schedule's account (only active accounts in the schedule's currency are offered) and category, and
+  lets the amount and date be corrected; the button is disabled while saving and the API returns
+  the first transaction on a repeat, so a double tap cannot record twice. Skip asks for
+  confirmation; skipped and paused occurrences offer "Expect it after all"; recorded ones link to
+  their transaction. Row actions wrap below the text on phones.
+- **Subscriptions.** Estimates per currency (next 30 days, next 12 months, overdue) with a note
+  that they are estimates; cards with provider, billing rhythm, next charge, and a 12-month
+  estimate; record a due charge, pause, resume, cancel (confirmation), archive, restore. The empty
+  state says subscriptions are added by the person, not detected.
+- **Goals.** Cards with a progress meter (uncapped percentage, "beyond the target" when exceeded),
+  target date, days left, and the monthly amount needed. Details offer Add / Take out / Set total
+  with a note that nothing moves between accounts, the history, and pause, complete, reopen,
+  archive, restore.
+- **Verified** with headless Chrome at 320, 375, 430, 768, 1024, 1280, and 1440px in both themes
+  (all four sections and the dashboard): no horizontal overflow and no failed section in 71 renders.
+
 ## 8. Prototype data rules
 
-- Sample data lives only in [`src/fixtures/sample-finances.ts`](../apps/web/src/fixtures/sample-finances.ts).
-  It is typed with the shared DTOs and feature view models, validated against the shared Zod
-  schemas by a test, and its totals are internally consistent (also tested).
-- Only prototype route files (and features via props) may use it. ESLint forbids importing fixtures
-  from `components/`, `hooks/`, `lib/`, `services/`, `types/`, and — since Phase 6 — from the live
-  features and routes (`features/{dashboard,accounts,transactions}/**` and
-  `app/*/{dashboard,accounts,transactions}/**`), so a live page cannot fall back to sample data.
-- Since Phase 6 the fixture holds only what the Budgets preview needs (categories and sample
-  budgets). Every screen showing fixture data carries a "Design preview" badge, a `PreviewNotice`,
-  or a "Sample data" badge. Aggregates are stated in the fixture, never calculated in the UI.
-- **Replacing a prototype:** build the live feature against the API, delete the prototype
-  components and their fixture data, and extend the lint ban to the new live paths. The shell needs
-  no changes.
+- Since Phase 7 no sample data remains: the Budgets preview was the last user of
+  `src/fixtures/sample-finances.ts`, which has been deleted with its test. Every finance screen
+  shows live API data only.
+- The ESLint ban stays and now covers every live feature and route
+  (`features/{dashboard,accounts,transactions,budgets,recurring,subscriptions,goals,planning}/**`,
+  `app/*/{dashboard,accounts,transactions,budgets}/**`, and the shared layers), so sample data can
+  never be reintroduced where it could pass for real figures. Any future preview must carry a
+  "Design preview" badge or a `PreviewNotice`.
 
 ## 9. Accessibility checklist
 

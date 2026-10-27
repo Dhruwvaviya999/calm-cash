@@ -17,8 +17,11 @@ import { createOriginCheck } from './middleware/origin-check';
 import { createRequestLogger } from './middleware/request-logger';
 import type { AccountsModuleDependencies } from './modules/accounts/accounts.routes';
 import type { AuthModuleDependencies } from './modules/auth/auth.routes';
+import type { BudgetsModuleDependencies } from './modules/budgets/budgets.routes';
 import type { CategoriesModuleDependencies } from './modules/categories/categories.routes';
 import type { DashboardModuleDependencies } from './modules/dashboard/dashboard.routes';
+import type { GoalsModuleDependencies } from './modules/goals/goals.routes';
+import type { RecurringModuleDependencies } from './modules/recurring';
 import type { TagsModuleDependencies } from './modules/tags/tags.routes';
 import type { TransactionsModuleDependencies } from './modules/transactions/transactions.routes';
 import { createV1Router } from './routes/v1';
@@ -36,6 +39,9 @@ export interface AppDependencies {
   categories: CategoriesModuleDependencies;
   tags: TagsModuleDependencies;
   dashboard: DashboardModuleDependencies;
+  budgets: BudgetsModuleDependencies;
+  recurring: RecurringModuleDependencies;
+  goals: GoalsModuleDependencies;
 }
 
 /**
@@ -53,6 +59,9 @@ export function createApp({
   categories,
   tags,
   dashboard,
+  budgets,
+  recurring,
+  goals,
 }: AppDependencies): Express {
   const app = express();
 
@@ -91,6 +100,9 @@ export function createApp({
       categories,
       tags,
       dashboard,
+      budgets,
+      recurring,
+      goals,
       authConfig: { session: config.session, webAppUrl: config.webAppUrl },
     }),
   );

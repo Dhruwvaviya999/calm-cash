@@ -90,12 +90,13 @@ export default defineConfig(
   },
 
   // Prototype fixtures may only feed preview UI, never infrastructure, the reusable design system,
-  // or a live page (dashboard, accounts, transactions), where they could pass for real data.
+  // or a live page, where they could pass for real data. Since Phase 7 every finance page is live
+  // and no fixture remains; the ban keeps it that way.
   {
     files: [
       'apps/web/src/{components,hooks,lib,services,types}/**/*.{ts,tsx}',
-      'apps/web/src/features/{dashboard,accounts,transactions}/**/*.{ts,tsx}',
-      'apps/web/src/app/*/{dashboard,accounts,transactions}/**/*.{ts,tsx}',
+      'apps/web/src/features/{dashboard,accounts,transactions,budgets,recurring,subscriptions,goals,planning}/**/*.{ts,tsx}',
+      'apps/web/src/app/*/{dashboard,accounts,transactions,budgets}/**/*.{ts,tsx}',
     ],
     rules: {
       'no-restricted-imports': [

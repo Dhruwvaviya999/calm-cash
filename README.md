@@ -3,13 +3,15 @@
 CalmCash is an AI-powered personal finance tracker. The roadmap covers transaction management,
 budgeting, bank statement imports, financial analytics, AI insights, and recurring payments.
 
-> **Status — Phase 6 (live dashboard and analytics) complete.** On top of the foundation, design
-> system, authentication, accounts, and transactions of Phases 1–5, the dashboard shows what each
-> person holds and owes per currency, and — for a chosen period in their own time zone — money in,
-> money out, net cash flow, and savings rate against the previous period, a cash-flow trend,
-> spending by category, and recent activity, all from exact database aggregates. Dashboard,
-> Accounts, and Transactions use live data; budgets and insights still show clearly labelled sample
-> data until later phases.
+> **Status — Phase 7 (budgets, recurring payments, and planning) complete.** On top of Phases 1–6
+> (foundation, design system, authentication, accounts, transactions, live dashboard), people can set
+> weekly, monthly, quarterly, yearly, or custom budgets for one category or all spending and see —
+> from the ledger, in their own time zone — what they spent, what is left (negative when over), and
+> how much of the limit is used, with configurable in-app alerts. Recurring income and bills appear
+> on an upcoming list and a month calendar; confirming one records a real transaction exactly once
+> through the transaction ledger. Subscriptions are tracked with honest cost estimates, and savings
+> goals track money set aside without touching any account. Every page uses live data; only
+> Insights is still an upcoming-feature page.
 
 ## Tech stack
 
@@ -36,20 +38,20 @@ calmcash/
 │   │       ├── config/      Validated environment configuration
 │   │       ├── lib/         Database client, logger, errors, request IDs, shutdown
 │   │       ├── middleware/  Request logging, validation, 404, error handler
-│   │       ├── modules/     Feature modules (health, auth, accounts, transactions, categories, tags, dashboard)
+│   │       ├── modules/     Feature modules (health, auth, accounts, transactions, categories, tags,
+│   │       │                dashboard, budgets, recurring, subscriptions, goals)
 │   │       └── routes/      Versioned routers (/api/v1)
 │   └── web/                 Next.js web app (TypeScript)
 │       └── src/
 │           ├── app/         Routes: (app) group with the shared shell, boundaries
 │           ├── components/  Design system: ui primitives, layout, feedback, finance, forms, charts
-│           ├── features/    Feature modules (dashboard, transactions, budgets, …)
-│           ├── fixtures/    Prototype-only sample data (always labelled in the UI)
+│           ├── features/    Feature modules (dashboard, transactions, budgets, recurring, goals, …)
 │           ├── hooks/       Reusable React hooks
 │           ├── lib/         Env, API client, navigation, formatting, preferences
 │           ├── services/    Typed API endpoint functions
 │           └── types/       Web-only types
 ├── packages/
-│   └── shared/              DTO types, Zod schemas, constants, money and period/ratio helpers
+│   └── shared/              DTO types, Zod schemas, constants, money, periods, ratios, recurrence
 ├── prisma/
 │   ├── schema.prisma        Database schema
 │   └── migrations/          Versioned SQL migrations
@@ -114,7 +116,8 @@ as **Connected**. The API health endpoints are
 - [Authentication and security](docs/authentication.md) — sessions, cookies, CSRF, passwords,
   e-mail tokens, rate limits, deployment model, configuration.
 - [Database design](docs/database-design.md) — model relationships, money representation, balance
-  rules, transactions, categories, tags, locking, constraints, migrations.
+  rules, transactions, categories, tags, locking, dashboard metrics, budgets, recurrence, goals,
+  constraints, migrations.
 - [Development guide](docs/development-guide.md) — setup, commands, testing, conventions,
   troubleshooting.
 

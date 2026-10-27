@@ -85,6 +85,9 @@ export function transactionWhere(
       OR: [{ categoryId: filters.categoryId }, { category: { parentId: filters.categoryId } }],
     });
   }
+  if (filters.currency !== undefined) {
+    conditions.push({ currency: filters.currency });
+  }
   if (filters.paymentMethod !== undefined) {
     conditions.push({ paymentMethod: filters.paymentMethod });
   }

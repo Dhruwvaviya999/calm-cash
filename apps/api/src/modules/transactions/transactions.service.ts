@@ -43,6 +43,7 @@ import { toTransactionListItemDto } from './transactions.mapper';
 import {
   IdempotencyKeyTakenError,
   type Ledger,
+  type LinkedWriteClient,
   type TransactionRecord,
   type TransactionsRepository,
   type TransactionWrite,
@@ -52,6 +53,21 @@ import {
 export interface WriteOutcome {
   item: TransactionListItemDto;
   replayed: boolean;
+}
+
+/**
+ * Another module's rows that must change together with a new transaction (for example the
+ * scheduled occurrence it settles). Both callbacks run inside the write's database transaction;
+ * anything they throw rolls the transaction back with everything else.
+ */
+export interface LinkedRecording {
+  /**
+   * Runs first, before any account is locked: lock and check the linked rows here. Returns the ID
+   * of a transaction the link already recorded to replay it instead of writing a new one.
+   */
+  claim: (db: LinkedWriteClient) => Promise<string | undefined>;
+  /** Runs after the transaction is written and every balance rule held. */
+  commit: (db: LinkedWriteClient, transactionId: string) => Promise<void>;
 }
 
 export interface TransactionsService {
@@ -83,6 +99,15 @@ export interface TransactionsService {
     caller: Caller,
     input: CreateReconciliationInput,
     idempotencyKey: string | undefined,
+  ) => Promise<WriteOutcome>;
+  /**
+   * Records income or an expense exactly like `create` — same locks, ownership, archive, date,
+   * category, and balance rules — atomically with another module's linked rows.
+   */
+  recordLinked: (
+    caller: Caller,
+    input: CreateTransactionInput,
+    link: LinkedRecording,
   ) => Promise<WriteOutcome>;
 }
 
@@ -570,6 +595,29 @@ export function createTransactionsService({
         });
         return { id, replayed: false };
       });
+    },
+
+    recordLinked: async (caller, input, link) => {
+      const at = now();
+      const { id, replayed } = await repository.inLedger(async (ledger) => {
+        // The linked rows are locked before any account, so this write queues behind (and then
+        // sees) a concurrent one for the same link instead of recording the money twice.
+        const recorded = await link.claim(ledger.client);
+        if (recorded !== undefined) {
+          return { id: recorded, replayed: true };
+        }
+        const transactionId = await writeLocked(
+          ledger,
+          caller,
+          input,
+          at,
+          undefined,
+          async (write) => (await ledger.insert(caller.userId, write, null, at)).id,
+        );
+        await link.commit(ledger.client, transactionId);
+        return { id: transactionId, replayed: false };
+      });
+      return { item: await load(caller, id), replayed };
     },
   };
 }

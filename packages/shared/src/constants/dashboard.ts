@@ -28,6 +28,12 @@ export const DASHBOARD_CATEGORY_LIMIT = 6;
 export const DASHBOARD_RECENT_LIMIT = 6;
 
 /** Why a ratio could not be calculated (instead of dividing by zero). */
-export const RATIO_UNAVAILABLE_REASONS = ['no_income', 'no_previous_value'] as const;
+export const RATIO_UNAVAILABLE_REASONS = [
+  'no_income',
+  'no_previous_value',
+  // Planning (Phase 7): a budget without a limit, a goal without a target.
+  'no_limit',
+  'no_target',
+] as const;
 
 export type RatioUnavailableReason = (typeof RATIO_UNAVAILABLE_REASONS)[number];

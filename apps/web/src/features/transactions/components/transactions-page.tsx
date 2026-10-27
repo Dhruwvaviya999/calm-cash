@@ -290,6 +290,13 @@ export function TransactionsPage(): ReactNode {
       clear: { categoryId: undefined },
     });
   }
+  if (filters.currency !== undefined) {
+    chips.push({
+      key: 'currency',
+      label: `${filters.currency} only`,
+      clear: { currency: undefined },
+    });
+  }
   if (filters.paymentMethod !== undefined) {
     chips.push({
       key: 'method',

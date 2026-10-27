@@ -43,6 +43,8 @@ const budget = {
   currency: 'INR',
   period: 'monthly',
   startDate: '2026-10-01',
+  alertThresholdsBp: [8000],
+  status: 'active',
   createdAt: TIMESTAMP,
   updatedAt: TIMESTAMP,
 } satisfies BudgetDto;

@@ -329,6 +329,7 @@ const transactionFilterShape = {
   type: transactionTypeSchema.exactOptional(),
   accountId: entityIdSchema.exactOptional(),
   categoryId: entityIdSchema.exactOptional(),
+  currency: currencyCodeSchema.exactOptional(),
   paymentMethod: paymentMethodSchema.exactOptional(),
   tags: tagsQuerySchema.exactOptional(),
   from: isoDateSchema.exactOptional(),

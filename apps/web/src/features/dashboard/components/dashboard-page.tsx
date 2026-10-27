@@ -41,6 +41,7 @@ import {
   SectionCard,
   SectionLinkArrow,
 } from './dashboard-sections';
+import { BudgetsPreview, GoalsPreview, UpcomingPreview } from './planning-sections';
 import { SpendingChart } from './spending-chart';
 
 /** A response together with the query it answers, to tell when newer figures are on the way. */
@@ -322,6 +323,12 @@ export function DashboardPage(): ReactNode {
           </SectionCard>
         </>
       )}
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:items-start">
+        <BudgetsPreview currency={selection.currency} />
+        <UpcomingPreview timeZone={user.timezone} />
+        <GoalsPreview />
+      </div>
     </>
   );
 }

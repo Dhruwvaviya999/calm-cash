@@ -2,6 +2,7 @@ import {
   addDaysToIsoDate,
   AMOUNT_FILTER_PATTERN,
   compareAmountFilters,
+  currencyCodeSchema,
   DEFAULT_TRANSACTION_PAGE_SIZE,
   entityIdSchema,
   isoDateSchema,
@@ -13,6 +14,7 @@ import {
   transactionSortSchema,
   transactionStatusFilterSchema,
   transactionTypeSchema,
+  type CurrencyCode,
   type IsoDateString,
   type PaymentMethod,
   type TransactionSort,
@@ -32,6 +34,8 @@ export interface TransactionFilters {
   type: TransactionType | undefined;
   accountId: string | undefined;
   categoryId: string | undefined;
+  /** Set by links that need one currency (a budget's expenses); not offered in the filter sheet. */
+  currency: CurrencyCode | undefined;
   paymentMethod: PaymentMethod | undefined;
   tags: string[];
   from: IsoDateString | undefined;
@@ -48,6 +52,7 @@ export const DEFAULT_FILTERS: TransactionFilters = {
   type: undefined,
   accountId: undefined,
   categoryId: undefined,
+  currency: undefined,
   paymentMethod: undefined,
   tags: [],
   from: undefined,
@@ -88,6 +93,7 @@ export function readFilters(params: ReadableParams): TransactionFilters {
     type: parsed(transactionTypeSchema, params.get('type')),
     accountId: parsed(entityIdSchema, params.get('accountId')),
     categoryId: parsed(entityIdSchema, params.get('categoryId')),
+    currency: parsed(currencyCodeSchema, params.get('currency')),
     paymentMethod: parsed(paymentMethodSchema, params.get('paymentMethod')),
     tags,
     from: parsed(isoDateSchema, params.get('from')),
@@ -124,6 +130,7 @@ function filterParams(filters: TransactionFilters): URLSearchParams {
   set('type', filters.type);
   set('accountId', filters.accountId);
   set('categoryId', filters.categoryId);
+  set('currency', filters.currency);
   set('paymentMethod', filters.paymentMethod);
   set('tags', filters.tags.join(','));
   set('from', filters.from);
@@ -169,6 +176,7 @@ export function countActiveFilters(filters: TransactionFilters): number {
     filters.type !== undefined,
     filters.accountId !== undefined,
     filters.categoryId !== undefined,
+    filters.currency !== undefined,
     filters.paymentMethod !== undefined,
     filters.tags.length > 0,
     filters.from !== undefined || filters.to !== undefined,

@@ -7,6 +7,10 @@ import {
 } from '../modules/accounts/accounts.routes';
 import { createAccountsService } from '../modules/accounts';
 import {
+  createBudgetsRouter,
+  type BudgetsModuleDependencies,
+} from '../modules/budgets/budgets.routes';
+import {
   createDashboardRouter,
   type DashboardModuleDependencies,
 } from '../modules/dashboard/dashboard.routes';
@@ -19,12 +23,20 @@ import {
   type AuthModuleConfig,
   type AuthModuleDependencies,
 } from '../modules/auth/auth.routes';
+import { createGoalsRouter, type GoalsModuleDependencies } from '../modules/goals/goals.routes';
 import { createHealthRouter } from '../modules/health/health.routes';
+import {
+  createRecurringRouter,
+  createRecurringService,
+  type RecurringModuleDependencies,
+} from '../modules/recurring';
+import { createSubscriptionsRouter } from '../modules/subscriptions/subscriptions.routes';
 import { createTagsRouter, type TagsModuleDependencies } from '../modules/tags/tags.routes';
 import {
   createTransactionsRouter,
   type TransactionsModuleDependencies,
 } from '../modules/transactions/transactions.routes';
+import { createTransactionsService } from '../modules/transactions';
 
 export interface V1RouterDependencies {
   checkDatabase: DatabaseHealthCheck;
@@ -35,6 +47,9 @@ export interface V1RouterDependencies {
   categories: CategoriesModuleDependencies;
   tags: TagsModuleDependencies;
   dashboard: DashboardModuleDependencies;
+  budgets: BudgetsModuleDependencies;
+  recurring: RecurringModuleDependencies;
+  goals: GoalsModuleDependencies;
 }
 
 /**
@@ -66,6 +81,23 @@ export function createV1Router(dependencies: V1RouterDependencies): Router {
     '/dashboard',
     createDashboardRouter(dependencies.dashboard, accounts.summary, boundary),
   );
+
+  // Planning (Phase 7). Confirming a scheduled payment records the real transaction through the
+  // transactions module's ledger, so every lock and balance rule of ordinary entry applies.
+  router.use('/budgets', createBudgetsRouter(dependencies.budgets, boundary));
+  const recurringNow = dependencies.recurring.now ?? ((): Date => new Date());
+  const recurring = createRecurringService({
+    repository: dependencies.recurring.repository,
+    transactions: createTransactionsService({
+      repository: dependencies.transactions.repository,
+      now: dependencies.transactions.now ?? recurringNow,
+    }),
+    now: recurringNow,
+  });
+  router.use('/recurring', createRecurringRouter(recurring, boundary));
+  // Subscriptions are recurring expense schedules: the same service behind scoped routes.
+  router.use('/subscriptions', createSubscriptionsRouter(recurring, boundary));
+  router.use('/goals', createGoalsRouter(dependencies.goals, boundary));
 
   return router;
 }

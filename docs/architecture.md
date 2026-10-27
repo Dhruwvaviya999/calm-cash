@@ -3,7 +3,8 @@
 This document describes how the CalmCash codebase is organised, how its parts communicate, and the
 rules that keep features decoupled as the product grows. It reflects the Phase 1 foundation, the
 Phase 3 authentication layer (detailed in [authentication.md](./authentication.md)), the Phase 4
-accounts module, and the Phase 5 transactions, categories, and tags modules.
+accounts module, the Phase 5 transactions, categories, and tags modules, the Phase 6 dashboard, and
+the Phase 7 planning modules (budgets, recurring schedules, subscriptions, savings goals).
 
 ## 1. Overview
 
@@ -44,7 +45,8 @@ apps/
     lib/                   Cross-cutting infrastructure (errors, logging, DB client, e-mail, auth boundary, …)
     middleware/            Request logging, origin check, validation convention, 404, error handler
     modules/<feature>/     Feature modules (routes → controller → service → repository): health, auth,
-                           accounts, transactions, categories, tags, dashboard
+                           accounts, transactions, categories, tags, dashboard, budgets, recurring,
+                           subscriptions, goals
     testing/               Test app factories, in-memory e-mail, integration-database harness
     routes/v1.ts           Composition root of API v1: mounts every module router
     generated/prisma/      Generated Prisma Client (git-ignored; `pnpm db:generate`)
@@ -54,7 +56,6 @@ apps/
     components/            Feature-agnostic design system (see docs/ui-architecture.md)
       ui/                  shadcn/ui primitives (owned source)
       brand/ layout/ theme/ feedback/ finance/ forms/ charts/
-    fixtures/              Prototype-only sample data (never imported by shared code or live pages)
     testing/               Test setup and helpers (auth context values)
     hooks/                 Reusable React hooks
     lib/                   Infrastructure: env, API client, navigation, formatting, preferences
@@ -66,6 +67,7 @@ packages/shared/src/
   schemas/                 Zod schemas mirroring every DTO
   money/                   BigInt-based minor-unit helpers
   analytics/               Calendar periods, trend buckets, basis-point ratios (pure, clock-free)
+  planning/                Budget periods and progress, recurrence engine, goal progress (pure)
   index.ts                 The package's only public entry point
 prisma/
   schema.prisma
@@ -336,9 +338,11 @@ Rules that keep modules independent:
   [database-design.md §3b](./database-design.md#3b-transactions-categories-and-tags-phase-5).
 - **Dashboard (Phase 6, done):** see [§15](#15-dashboard-and-analytics-phase-6) and the metric
   definitions in [database-design.md §3c](./database-design.md#3c-dashboard-metrics-phase-6).
-- **Later phases** build on the same ledger: budgets read the same cash-flow definition
-  (`cashFlowScope`, which excludes transfers, adjustments, and voided rows), and statement imports
-  will add a source and a deduplication fingerprint per row (see the database design).
+- **Planning (Phase 7, done):** see [§16](#16-planning-phase-7) and
+  [database-design.md §3d](./database-design.md#3d-budgets-recurring-schedules-subscriptions-and-goals-phase-7).
+- **Later phases** build on the same ledger: statement imports will add a source and a
+  deduplication fingerprint per row (see the database design); notifications (Phase 9) can deliver
+  the budget alerts and due payments that Phase 7 only shows in the app.
 
 ## 13. Accounts module (Phase 4)
 
@@ -460,3 +464,55 @@ the ledger.
 - **Consistency.** Each response is computed from its own queries; the overview's current and
   previous totals come from one query, so they share a snapshot. The three endpoints are separate
   requests, so a write between them can show in one section before another — the next load agrees.
+
+## 16. Planning (Phase 7)
+
+Four independent modules on top of the ledger. Every route requires a session; state-changing
+routes also require the CSRF token; responses are `Cache-Control: no-store`. Bodies and queries are
+strict Zod schemas from `packages/shared/src/schemas/{budget,recurring,subscription,goal}.ts`, so
+owner IDs, statuses, cursors, archive times, and subscription flags sent by a client are rejected.
+Another user's budget, schedule, subscription, or goal answers exactly like a missing one (`404`).
+
+| Method & path                                                                      | Purpose                                                                      |
+| ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `GET /budgets`                                                                     | Budgets with progress (`status`, `period`, `categoryId`, `currency`, `date`) |
+| `GET /budgets/summary`                                                             | Status counts, totals per cadence (no double counting), highlights           |
+| `POST /budgets` · `GET`/`PATCH /budgets/:id`                                       | Create, read (`?date=`), update                                              |
+| `POST /budgets/:id/archive` · `…/restore`                                          | Archive / restore (idempotent)                                               |
+| `GET /recurring` · `GET /recurring/upcoming`                                       | Schedules; overdue and due occurrences (`from`, `to`, ≤ 366 days)            |
+| `POST /recurring` · `GET`/`PATCH /recurring/:id`                                   | Create, details (next occurrences and history), update                       |
+| `POST /recurring/:id/pause` · `resume` · `archive` · `restore` · `end`             | Lifecycle                                                                    |
+| `POST /recurring/:id/occurrences/:date/record`                                     | Record the real transaction (201, or 200 when already recorded)              |
+| `POST /recurring/:id/occurrences/:date/skip` · `unskip` · `postpone`               | Occurrence actions                                                           |
+| `GET /subscriptions` · `GET /subscriptions/summary`                                | Subscriptions with twelve-month estimates; estimates per currency            |
+| `POST /subscriptions` · `GET`/`PATCH /subscriptions/:id`                           | Create (always an expense schedule), read, update                            |
+| `POST /subscriptions/:id/pause` · `resume` · `cancel` · `archive` · `restore`      | Lifecycle                                                                    |
+| `GET /goals` · `POST /goals` · `GET`/`PATCH /goals/:id`                            | Savings goals with progress                                                  |
+| `POST /goals/:id/contributions`                                                    | Add, withdraw, or set the tracked amount (planning allocation)               |
+| `POST /goals/:id/pause` · `resume` · `complete` · `reopen` · `archive` · `restore` | Lifecycle                                                                    |
+
+- **Budgets** (`modules/budgets`): `budget-metrics.ts` (pure: window per budget, progress DTO,
+  totals without double counting) · `budgets.repository.ts` (one aggregate query for the spending
+  of every listed budget — `unnest` of the windows joined to the expenses, so a list is one query,
+  never one per budget; a per-user advisory lock serialises creates and edits for the overlap
+  rule) · service · mapper · controller · routes.
+- **Recurring** (`modules/recurring`): `recurring-engine.ts` (pure: status, cursor, pending
+  occurrences, occurrence DTOs, built on the shared recurrence engine) · repository (schedule row
+  lock, occurrence rows) · service · mapper · controller · routes. It publishes an `index.ts`
+  because subscriptions reuse its service.
+- **Subscriptions** (`modules/subscriptions`) hold no table and no date logic: a subscription is a
+  recurring expense schedule with `is_subscription`. The module scopes requests to subscriptions and
+  adds estimates from the recurring service's occurrences.
+- **Goals** (`modules/goals`): goals and their contributions; the tracked amount is the sum of
+  contributions, read with one grouped query for a list.
+- **Recording money.** The composition root (`routes/v1.ts`) builds the recurring service with the
+  transactions service. Confirming an occurrence calls `transactions.recordLinked(caller, input,
+{ claim, commit })` (exported from `modules/transactions/index.ts`): inside the transaction
+  module's ledger transaction, `claim` locks the schedule row and checks the occurrence, then the
+  ordinary write path locks the accounts and applies every ownership, archive, date, category, and
+  balance rule, and finally `commit` stores the occurrence as recorded and advances the cursor. The
+  recurring module never writes transactions or balances itself. Lock order is schedule row, then
+  accounts (by ID), so it never conflicts with ordinary writes, which lock accounts only.
+- **Clock and time zone.** Every service takes an injectable `now()` and reads "today" with
+  `calendarDateInTimeZone(now(), caller.timeZone)`. No background job exists: due and overdue
+  states are calculated on each request from persisted rules, so nothing depends on a scheduler.

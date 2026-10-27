@@ -77,7 +77,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     href: '/budgets',
     label: 'Budgets',
     mobileLabel: 'Budgets',
-    description: 'Spending limits that keep you on track',
+    description: 'Budgets, bills, subscriptions, and goals',
     icon: PiggyBank,
     group: 'manage',
     mobilePlacement: 'bar',

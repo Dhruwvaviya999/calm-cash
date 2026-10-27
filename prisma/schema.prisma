@@ -96,6 +96,30 @@ enum BudgetPeriod {
   @@map("budget_period")
 }
 
+/// How a recurring schedule repeats; combined with `interval` (every 2 weeks, every 3 months, …).
+enum RecurringFrequency {
+  weekly
+  monthly
+  yearly
+
+  @@map("recurring_frequency")
+}
+
+/// What the person did with one occurrence of a schedule. Occurrences nobody acted on are not
+/// stored: they are pending and follow from the schedule's rule.
+enum OccurrenceState {
+  /// Still expected, on a later due date.
+  postponed
+  /// A real transaction was recorded for it (`transaction_id`).
+  recorded
+  /// The person said it will not happen this time.
+  skipped
+  /// It fell while the schedule was paused, so it is not owed.
+  paused
+
+  @@map("occurrence_state")
+}
+
 /// What a single-use e-mail token proves when it is consumed.
 enum AuthTokenPurpose {
   email_verification
@@ -121,12 +145,16 @@ model User {
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  accounts     Account[]
-  categories   Category[]
-  transactions Transaction[]
-  budgets      Budget[]
-  sessions     Session[]
-  authTokens   AuthToken[]
+  accounts             Account[]
+  categories           Category[]
+  transactions         Transaction[]
+  budgets              Budget[]
+  sessions             Session[]
+  authTokens           AuthToken[]
+  recurringSchedules   RecurringSchedule[]
+  scheduledOccurrences ScheduledOccurrence[]
+  savingsGoals         SavingsGoal[]
+  goalContributions    GoalContribution[]
 
   @@map("users")
 }
@@ -200,9 +228,10 @@ model Account {
   createdAt           DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt           DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  transactions      Transaction[] @relation("TransactionAccount")
-  incomingTransfers Transaction[] @relation("TransactionTransferAccount")
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions       Transaction[]       @relation("TransactionAccount")
+  incomingTransfers  Transaction[]       @relation("TransactionTransferAccount")
+  recurringSchedules RecurringSchedule[]
 
   // "Accounts of a user", optionally by status (active means archived_at IS NULL).
   @@index([userId, archivedAt])
@@ -222,12 +251,13 @@ model Category {
   createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt  DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   // NO ACTION: a top-level category with subcategories cannot be deleted from under them.
-  parent       Category?     @relation("CategoryTree", fields: [parentId], references: [id], onDelete: NoAction)
-  children     Category[]    @relation("CategoryTree")
-  transactions Transaction[]
-  budgets      Budget[]
+  parent             Category?           @relation("CategoryTree", fields: [parentId], references: [id], onDelete: NoAction)
+  children           Category[]          @relation("CategoryTree")
+  transactions       Transaction[]
+  budgets            Budget[]
+  recurringSchedules RecurringSchedule[]
 
   @@unique([userId, kind, name])
   @@index([parentId])
@@ -268,12 +298,14 @@ model Transaction {
   createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt           DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user            User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   // NO ACTION: an account with history cannot be deleted directly (archive it instead), while
   // deleting the owning user still cascades because the check runs at the end of the statement.
-  account         Account   @relation("TransactionAccount", fields: [accountId], references: [id], onDelete: NoAction)
-  transferAccount Account?  @relation("TransactionTransferAccount", fields: [transferAccountId], references: [id], onDelete: NoAction)
-  category        Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  account         Account              @relation("TransactionAccount", fields: [accountId], references: [id], onDelete: NoAction)
+  transferAccount Account?             @relation("TransactionTransferAccount", fields: [transferAccountId], references: [id], onDelete: NoAction)
+  category        Category?            @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  /// Set when the transaction was recorded by confirming a scheduled occurrence.
+  occurrence      ScheduledOccurrence?
 
   @@unique([userId, idempotencyKey])
   @@index([userId, occurredAt(sort: Desc)])
@@ -285,20 +317,25 @@ model Transaction {
 }
 
 model Budget {
-  id         String       @id @default(uuid(7)) @db.Uuid
-  userId     String       @map("user_id") @db.Uuid
-  name       String       @db.VarChar(100)
+  id                String       @id @default(uuid(7)) @db.Uuid
+  userId            String       @map("user_id") @db.Uuid
+  name              String       @db.VarChar(100)
   /// Null means the budget covers all expense categories.
-  categoryId String?      @map("category_id") @db.Uuid
+  categoryId        String?      @map("category_id") @db.Uuid
   /// Positive spending limit per period, in minor units of `currency`.
-  limitMinor BigInt       @map("limit_minor")
-  currency   String       @db.Char(3)
-  period     BudgetPeriod
-  startDate  DateTime     @map("start_date") @db.Date
+  limitMinor        BigInt       @map("limit_minor")
+  currency          String       @db.Char(3)
+  period            BudgetPeriod
+  startDate         DateTime     @map("start_date") @db.Date
   /// Optional for recurring periods; required when `period` is `custom` (CHECK constraint).
-  endDate    DateTime?    @map("end_date") @db.Date
-  createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt  DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  endDate           DateTime?    @map("end_date") @db.Date
+  description       String?      @db.VarChar(500)
+  /// In-app alerts in basis points of the limit, ascending, at most three (CHECK constraint).
+  alertThresholdsBp Int[]        @default([8000]) @map("alert_thresholds_bp")
+  /// Set while archived: kept with its history, left out of lists and summaries.
+  archivedAt        DateTime?    @map("archived_at") @db.Timestamptz(3)
+  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   // NO ACTION: deleting a category must not silently widen a budget to "all categories".
@@ -307,4 +344,121 @@ model Budget {
   @@index([userId])
   @@index([categoryId])
   @@map("budgets")
+}
+
+/// A rule describing expected income or spending (salary, rent, a subscription). It is a plan:
+/// money only moves when the person confirms an occurrence, which records a real transaction.
+model RecurringSchedule {
+  id                 String             @id @default(uuid(7)) @db.Uuid
+  userId             String             @map("user_id") @db.Uuid
+  name               String             @db.VarChar(100)
+  /// `income` or `expense` only (CHECK constraint).
+  type               TransactionType
+  /// Expected amount per occurrence, positive, in minor units of `currency`.
+  amountMinor        BigInt             @map("amount_minor")
+  currency           String             @db.Char(3)
+  /// Usual account (same currency, API-enforced); may also be chosen when recording.
+  accountId          String?            @map("account_id") @db.Uuid
+  categoryId         String?            @map("category_id") @db.Uuid
+  merchant           String?            @db.VarChar(120)
+  paymentMethod      PaymentMethod?     @map("payment_method")
+  notes              String?            @db.VarChar(2000)
+  frequency          RecurringFrequency
+  interval           Int                @default(1) @db.SmallInt
+  /// The first occurrence (the anchor): later dates follow its weekday or day of the month.
+  startDate          DateTime           @map("start_date") @db.Date
+  endDate            DateTime?          @map("end_date") @db.Date
+  reminderDays       Int?               @map("reminder_days") @db.SmallInt
+  /// Cursor: the earliest occurrence not yet recorded, skipped, or passed over (null when none is
+  /// left). Maintained by every write while it holds the schedule's row lock.
+  nextOccurrenceDate DateTime?          @map("next_occurrence_date") @db.Date
+  isSubscription     Boolean            @default(false) @map("is_subscription")
+  pausedAt           DateTime?          @map("paused_at") @db.Timestamptz(3)
+  /// Subscriptions only: marked cancelled (an end date is then set; CHECK constraint).
+  cancelledAt        DateTime?          @map("cancelled_at") @db.Timestamptz(3)
+  archivedAt         DateTime?          @map("archived_at") @db.Timestamptz(3)
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user        User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // NO ACTION: accounts and categories are archived, never deleted, while schedules use them.
+  account     Account?              @relation(fields: [accountId], references: [id], onDelete: NoAction)
+  category    Category?             @relation(fields: [categoryId], references: [id], onDelete: NoAction)
+  occurrences ScheduledOccurrence[]
+
+  @@index([userId, archivedAt])
+  @@index([accountId])
+  @@index([categoryId])
+  @@map("recurring_schedules")
+}
+
+/// One occurrence of a schedule that the person acted on. Its identity is the schedule plus the
+/// date the rule puts it on (`scheduled_date`), so the same cycle can never exist twice.
+model ScheduledOccurrence {
+  id            String          @id @default(uuid(7)) @db.Uuid
+  userId        String          @map("user_id") @db.Uuid
+  scheduleId    String          @map("schedule_id") @db.Uuid
+  scheduledDate DateTime        @map("scheduled_date") @db.Date
+  /// Equals `scheduled_date` unless postponed (never earlier; CHECK constraint).
+  dueDate       DateTime        @map("due_date") @db.Date
+  state         OccurrenceState
+  /// The real transaction; present exactly when `state` is `recorded` (CHECK constraint).
+  transactionId String?         @unique @map("transaction_id") @db.Uuid
+  /// When it was recorded, skipped, or passed over; null while postponed.
+  resolvedAt    DateTime?       @map("resolved_at") @db.Timestamptz(3)
+  createdAt     DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  schedule    RecurringSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  // NO ACTION: transactions are voided, never deleted.
+  transaction Transaction?      @relation(fields: [transactionId], references: [id], onDelete: NoAction)
+
+  @@unique([scheduleId, scheduledDate])
+  @@index([userId, dueDate])
+  @@map("scheduled_occurrences")
+}
+
+/// Something the person is saving towards. Progress is the sum of its contributions (planning
+/// allocations), which never change an account balance.
+model SavingsGoal {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  name        String    @db.VarChar(100)
+  description String?   @db.VarChar(500)
+  /// Positive target in minor units of `currency`.
+  targetMinor BigInt    @map("target_minor")
+  currency    String    @db.Char(3)
+  targetDate  DateTime? @map("target_date") @db.Date
+  pausedAt    DateTime? @map("paused_at") @db.Timestamptz(3)
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(3)
+  archivedAt  DateTime? @map("archived_at") @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contributions GoalContribution[]
+
+  @@index([userId, archivedAt])
+  @@map("savings_goals")
+}
+
+/// A planning allocation towards a goal: money set aside (positive) or taken back (negative). It
+/// is not a transaction and never moves money between accounts.
+model GoalContribution {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  goalId        String   @map("goal_id") @db.Uuid
+  /// Signed, never zero, in minor units of the goal's currency.
+  amountMinor   BigInt   @map("amount_minor")
+  contributedOn DateTime @map("contributed_on") @db.Date
+  note          String?  @db.VarChar(200)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goal SavingsGoal @relation(fields: [goalId], references: [id], onDelete: Cascade)
+
+  @@index([goalId, contributedOn])
+  @@map("goal_contributions")
 }

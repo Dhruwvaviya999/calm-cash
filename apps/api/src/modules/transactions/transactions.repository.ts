@@ -85,8 +85,16 @@ export class IdempotencyKeyTakenError extends Error {
   override readonly name = 'IdempotencyKeyTakenError';
 }
 
+/**
+ * The database client of a ledger's transaction, handed to another module that must change its
+ * own rows atomically with a transaction write (confirming a scheduled occurrence).
+ */
+export type LinkedWriteClient = Prisma.TransactionClient;
+
 /** Operations available inside one atomic write. */
 export interface Ledger {
+  /** The same database transaction, for linked writes of other modules. */
+  client: LinkedWriteClient;
   findByIdempotencyKey: (userId: string, key: string) => Promise<TransactionRecord | null>;
   /** Locks the user's transactions with these IDs (ID order) and returns them; others are absent. */
   lockTransactions: (
@@ -143,6 +151,8 @@ function isUniqueViolation(error: unknown): boolean {
 
 function createLedger(tx: Prisma.TransactionClient): Ledger {
   return {
+    client: tx,
+
     findByIdempotencyKey: (userId, key) =>
       tx.transaction.findFirst({ where: { userId, idempotencyKey: key } }),
 

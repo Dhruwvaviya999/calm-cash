@@ -107,6 +107,7 @@ const DATE_STYLES = {
   fullDate: { day: 'numeric', month: 'long', year: 'numeric' },
   monthYear: { month: 'long', year: 'numeric' },
   monthShortYear: { month: 'short', year: '2-digit' },
+  monthShort: { month: 'short' },
 } as const satisfies Readonly<Record<string, Intl.DateTimeFormatOptions>>;
 
 export type DateStyle = keyof typeof DATE_STYLES;

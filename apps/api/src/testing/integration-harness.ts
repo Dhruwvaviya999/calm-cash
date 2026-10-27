@@ -19,8 +19,11 @@ import {
 } from '../modules/accounts/accounts.repository';
 import type { AuthRateLimits, RateLimitRule } from '../modules/auth/auth.rate-limits';
 import { createPrismaAuthRepository, type AuthRepository } from '../modules/auth/auth.repository';
+import { createPrismaBudgetsRepository } from '../modules/budgets/budgets.repository';
 import { createPrismaCategoriesRepository } from '../modules/categories/categories.repository';
 import { createPrismaDashboardRepository } from '../modules/dashboard/dashboard.repository';
+import { createPrismaGoalsRepository } from '../modules/goals/goals.repository';
+import { createPrismaRecurringRepository, type RecurringRepository } from '../modules/recurring';
 import { createPrismaTagsRepository } from '../modules/tags/tags.repository';
 import {
   createPrismaTransactionsRepository,
@@ -81,6 +84,8 @@ export interface TestContextOptions {
   accountsRepository?: (real: AccountsRepository) => AccountsRepository;
   /** Wraps the real transactions repository, e.g. to inject a failure in the middle of a write. */
   transactionsRepository?: (real: TransactionsRepository) => TransactionsRepository;
+  /** Wraps the real recurring repository, e.g. to inject a failure while recording a payment. */
+  recurringRepository?: (real: RecurringRepository) => RecurringRepository;
 }
 
 /**
@@ -138,6 +143,14 @@ export function useIntegrationDatabase(): {
         categories: { repository: createPrismaCategoriesRepository(prisma), now: clock.now },
         tags: { repository: createPrismaTagsRepository(prisma) },
         dashboard: { repository: createPrismaDashboardRepository(prisma), now: clock.now },
+        budgets: { repository: createPrismaBudgetsRepository(prisma), now: clock.now },
+        recurring: {
+          repository: (options.recurringRepository ?? ((real) => real))(
+            createPrismaRecurringRepository(prisma),
+          ),
+          now: clock.now,
+        },
+        goals: { repository: createPrismaGoalsRepository(prisma), now: clock.now },
       });
       return { app, prisma, repository, email, clock, tasks };
     },

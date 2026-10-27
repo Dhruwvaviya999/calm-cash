@@ -43,3 +43,18 @@ export const positiveMinorUnitsSchema = z.string().refine(
   },
   { message: 'Must be a positive integer amount in minor units, e.g. "12550".' },
 );
+
+/** Single-line text: trimmed, required, no control characters. */
+export function singleLineTextSchema(max: number, emptyMessage: string): z.ZodString {
+  return z
+    .string({ error: emptyMessage })
+    .trim()
+    .min(1, { error: emptyMessage })
+    .max(max, { error: `Use at most ${max} characters.` })
+    .regex(/^\P{Cc}*$/u, { error: 'Remove unsupported characters.' });
+}
+
+/** A query-string flag: `true` or `false`. */
+export const booleanQuerySchema = z
+  .enum(['true', 'false'], { error: 'Use true or false.' })
+  .transform((value) => value === 'true');

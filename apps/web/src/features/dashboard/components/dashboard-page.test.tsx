@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
 import type {
+  BudgetSummaryDto,
   DashboardCategoriesDto,
   DashboardOverviewDto,
   DashboardTrendsDto,
   ExpenseTransactionDto,
+  SavingsGoalListDto,
   TransactionPageDto,
+  UpcomingOccurrencesDto,
 } from '@calmcash/shared';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -78,6 +81,19 @@ vi.mock('@/services/dashboard.service', () => services);
 
 const transactionServices = vi.hoisted(() => ({ listTransactions: vi.fn() }));
 vi.mock('@/services/transactions.service', () => transactionServices);
+
+const planningServices = vi.hoisted(() => ({
+  getBudgetSummary: vi.fn(),
+  getUpcomingOccurrences: vi.fn(),
+  listGoals: vi.fn(),
+}));
+vi.mock('@/services/budgets.service', () => ({
+  getBudgetSummary: planningServices.getBudgetSummary,
+}));
+vi.mock('@/services/recurring.service', () => ({
+  getUpcomingOccurrences: planningServices.getUpcomingOccurrences,
+}));
+vi.mock('@/services/goals.service', () => ({ listGoals: planningServices.listGoals }));
 
 // --- Data ----------------------------------------------------------------------------------------
 
@@ -211,7 +227,36 @@ const recentPage: TransactionPageDto = {
   pagination: { page: 1, pageSize: 6, totalItems: 1, totalPages: 1 },
 };
 
+const NO_BUDGETS: BudgetSummaryDto = {
+  date: '2026-10-27',
+  currencies: [],
+  statusCounts: {
+    on_track: 0,
+    approaching_limit: 0,
+    limit_reached: 0,
+    over_budget: 0,
+    not_applicable: 0,
+  },
+  totals: [],
+  highlights: [],
+};
+
+const NOTHING_UPCOMING: UpcomingOccurrencesDto = {
+  today: '2026-10-27',
+  from: '2026-10-27',
+  to: '2026-11-10',
+  items: [],
+  pendingTotals: [],
+  overdueCount: 0,
+  truncated: false,
+};
+
+const NO_GOALS: SavingsGoalListDto = { today: '2026-10-27', goals: [] };
+
 function respond(overview: DashboardOverviewDto = overviewData()): void {
+  planningServices.getBudgetSummary.mockResolvedValue(NO_BUDGETS);
+  planningServices.getUpcomingOccurrences.mockResolvedValue(NOTHING_UPCOMING);
+  planningServices.listGoals.mockResolvedValue(NO_GOALS);
   services.getDashboardOverview.mockResolvedValue(overview);
   services.getDashboardTrends.mockResolvedValue(trendsData);
   services.getDashboardCategories.mockResolvedValue(categoriesData);
@@ -222,6 +267,7 @@ beforeEach(() => {
   for (const mock of [
     ...Object.values(services),
     ...Object.values(transactionServices),
+    ...Object.values(planningServices),
     navigation.replace,
     navigation.push,
   ]) {
@@ -468,5 +514,45 @@ describe('DashboardPage', () => {
 
     await user.click(within(summary).getByRole('button', { name: 'What is savings rate?' }));
     expect(summary.textContent).toContain('Savings rate = (money in − money out) ÷ money in');
+  });
+
+  it('shows live planning previews and keeps them independent', async () => {
+    respond();
+    planningServices.getBudgetSummary.mockResolvedValue({
+      ...NO_BUDGETS,
+      currency: 'INR',
+      currencies: ['INR'],
+      statusCounts: { ...NO_BUDGETS.statusCounts, over_budget: 1 },
+      totals: [
+        {
+          period: 'monthly',
+          from: '2026-10-01',
+          to: '2026-10-31',
+          budgetCount: 1,
+          scope: 'categories',
+          limitMinor: '500000',
+          spentMinor: '650000',
+          remainingMinor: '-150000',
+          used: { status: 'available', basisPoints: '13000' },
+        },
+      ],
+    } satisfies BudgetSummaryDto);
+    planningServices.listGoals.mockRejectedValue(apiError('INTERNAL_ERROR', 'boom', 500));
+    renderWithAuth(<DashboardPage />);
+
+    const budgets = await screen.findByRole('region', { name: 'Budgets' });
+    await waitFor(() => {
+      expect(budgets.textContent).toContain('₹1,500.00');
+    });
+    expect(budgets.textContent).toContain('Over');
+    expect(budgets.textContent).toContain('1 over budget');
+    const upcoming = screen.getByRole('region', { name: 'Coming up' });
+    await waitFor(() => {
+      expect(upcoming.textContent).toContain('Nothing due in the next 14 days');
+    });
+    expect(
+      await screen.findByRole('heading', { name: 'Savings goals could not be loaded' }),
+    ).toBeDefined();
+    expect(screen.getByRole('region', { name: 'Where you stand' })).toBeDefined();
   });
 });
