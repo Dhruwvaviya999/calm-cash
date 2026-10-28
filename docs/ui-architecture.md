@@ -5,7 +5,7 @@ responsive application shell, the component system, and the rules that let later
 prototype screens without rewriting the shell. Established in Phase 2; Phase 3 added the
 authentication pages, route protection, and real account settings; Phase 4 made Accounts live;
 Phase 5 made Transactions live (§7b); Phase 6 the dashboard (§7c); Phase 7 Budgets & planning
-(§7d).
+(§7d); Phase 8 statement imports and receipts (§7e).
 
 ## 1. Design principles
 
@@ -194,6 +194,7 @@ still prerenders).
 | `/`                | Temporary (307) redirect to `/dashboard` (which sends signed-out visitors to `/login`).                                                                                       |
 | `/dashboard`       | **Live data** (§7c). Position, period summary, cash-flow trend, spending by category, recent activity; `?period=`, `?from=&to=`, `?currency=` in the URL.                     |
 | `/transactions`    | **Live data** (§7b). Record, search, filter, edit, void, restore, bulk-edit, and reconcile; filters in the URL; `?reconcile=<id>`, `?new=1`, `?transaction=<id>` open sheets. |
+| `/imports`         | **Live data** (§7e). Upload a CSV statement, import history; `?batch=<id>&step=map\|review\|reconcile` resumes one import.                                                    |
 | `/budgets`         | **Live data** (§7d). Budgets & planning: `?section=budgets` (default), `recurring`, `subscriptions`, `goals`.                                                                 |
 | `/accounts`        | **Live data.** Totals per currency (held vs. owed), accounts grouped by classification, active/archived filter, add/edit sheet, details sheet, archive and restore.           |
 | `/insights`        | Upcoming-feature state and what to expect (no generated insights).                                                                                                            |
@@ -353,6 +354,47 @@ the `(auth)` pages are public, and `/login` and `/register` send signed-in users
   archive, restore.
 - **Verified** with headless Chrome at 320, 375, 430, 768, 1024, 1280, and 1440px in both themes
   (all four sections and the dashboard): no horizontal overflow and no failed section in 71 renders.
+
+## 7e. Statement imports and receipts (Phase 8)
+
+- **Entry points.** "Statement imports" in the Manage group (sidebar; "More" on phones) and an
+  "Import statement" button in the Transactions header. `/imports` shows the upload form (account,
+  CSV file, and an optional "File layout" disclosure for the separator and header row) and the
+  import history; each import opens at `/imports?batch=<id>` (`&step=map|review|reconcile`), so
+  it survives refresh and can be resumed later.
+- **Stepper.** Upload → Map columns → Review & import → Reconcile, as an ordered list
+  (`aria-current="step"`); steps after mapping unlock once the columns are confirmed. A finished
+  import shows a summary instead (outcomes, the last balance check, links to the account's
+  transactions and to every row, read-only).
+- **Map columns.** The first rows exactly as read (text only, in a box that scrolls sideways on
+  its own; the page never does), one select per field, the date layout (no preselection when the
+  dates fit several layouts, with the reason shown), "One amount column" (with a required choice of
+  what a negative amount means) or "Separate columns", the decimal separator, and the optional
+  statement period and balances (cards and loans are entered as the amount owed).
+- **Review & import.** Counts, filters (Needs attention, Ready, Imported, Matched, Skipped, All),
+  "Check duplicates again", and "Import all ready (n)", which sends bounded requests until nothing
+  importable is left and then says exactly what happened (imported, already imported, needing a
+  category or decision, refused with the reason per line). Phones and narrow laptops get cards;
+  wide desktops (`xl`) a table with selection, "Set category" for the selected rows, and "Import
+  selected". A row sheet shows what the statement says, problems and warnings, duplicate
+  candidates ("It is this transaction" links instead of recording), "Not a duplicate", "Skip",
+  "Include this row again"/"Undo the match", and what will be recorded (type, category or other
+  account, payee, purpose, payment method, notes).
+- **Reconcile.** The statement's period and balances (editable without touching the mapping),
+  opening and closing checks side by side (statement, ledger at the same instant, the difference in
+  words), what to look for before correcting, and "Record a correction of …" behind a confirmation
+  that states the amount, date, and account. "Finish import" and "Cancel import" ask first; cancel
+  says imported transactions stay.
+- **Receipts.** The transaction details sheet has a Receipts section: "Attach" (JPEG, PNG, WebP,
+  or PDF up to 10 MB, checked for size before upload; the API's reason is shown when it refuses a
+  file), a list with name, type, size, and date, image previews fetched through the authorised API
+  into a temporary object URL, "Save" for any file, and "Remove" behind a confirmation that says the
+  transaction does not change. Receipts of transactions on archived accounts are read-only.
+- **Verified** with headless Chrome at 320, 375, 430, 768, 1024, 1280, and 1440px in both themes
+  (import history, mapping, review, reconcile, summary, and the transaction details with receipts):
+  no horizontal overflow of the page or of open sheets in 88 renders, no console errors, statement
+  text containing `<script>` shown as text. The review filters at phone width exposed a shared
+  `FilterOptions` bug (hidden radios widened the page when the options scrolled), fixed there.
 
 ## 8. Prototype data rules
 

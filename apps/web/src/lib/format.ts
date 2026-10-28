@@ -208,3 +208,14 @@ export function formatCompactMoney(
   }
   return `${value < 0n ? MINUS_SIGN : ''}${formatter.format(decimal)}`;
 }
+
+/** A file size for people, e.g. `"240 KB"` or `"1.4 MB"` (1 KB = 1,024 bytes). */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${String(bytes)} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${String(Math.round(bytes / 1024))} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}

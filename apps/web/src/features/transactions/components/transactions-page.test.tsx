@@ -79,6 +79,14 @@ const categoryServices = vi.hoisted(() => ({
 }));
 vi.mock('@/services/categories.service', () => categoryServices);
 
+const receiptServices = vi.hoisted(() => ({
+  listReceipts: vi.fn(() => Promise.resolve({ receipts: [] })),
+  uploadReceipt: vi.fn(),
+  downloadReceipt: vi.fn(),
+  removeReceipt: vi.fn(),
+}));
+vi.mock('@/services/receipts.service', () => receiptServices);
+
 // --- Data ----------------------------------------------------------------------------------------
 
 const USER = '0193a000-0000-7000-8000-000000000001';
@@ -500,6 +508,12 @@ describe('TransactionsPage', () => {
     const sheet = await screen.findByRole('dialog', { name: 'FreshMart' });
     expect(within(sheet).getByText('Weekly groceries')).toBeDefined();
     expect(within(sheet).getByText('family')).toBeDefined();
+    // Receipts belong to the details; they are loaded for this transaction only.
+    expect(await within(sheet).findByText('No receipts yet.')).toBeDefined();
+    expect(receiptServices.listReceipts).toHaveBeenCalledWith(
+      groceriesItem.transaction.id,
+      expect.any(AbortSignal),
+    );
     await user.click(within(sheet).getByRole('button', { name: 'Edit' }));
 
     const form = await screen.findByRole('form', { name: 'Edit transaction' });

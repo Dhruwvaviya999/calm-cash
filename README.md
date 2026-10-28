@@ -3,15 +3,17 @@
 CalmCash is an AI-powered personal finance tracker. The roadmap covers transaction management,
 budgeting, bank statement imports, financial analytics, AI insights, and recurring payments.
 
-> **Status — Phase 7 (budgets, recurring payments, and planning) complete.** On top of Phases 1–6
-> (foundation, design system, authentication, accounts, transactions, live dashboard), people can set
-> weekly, monthly, quarterly, yearly, or custom budgets for one category or all spending and see —
-> from the ledger, in their own time zone — what they spent, what is left (negative when over), and
-> how much of the limit is used, with configurable in-app alerts. Recurring income and bills appear
-> on an upcoming list and a month calendar; confirming one records a real transaction exactly once
-> through the transaction ledger. Subscriptions are tracked with honest cost estimates, and savings
-> goals track money set aside without touching any account. Every page uses live data; only
-> Insights is still an upcoming-feature page.
+> **Status — Phase 8 (bank statement import, receipts, and reconciliation) complete.** On top of
+> Phases 1–7 (foundation, design system, authentication, accounts, transactions, dashboard,
+> budgets and planning), people can import a CSV bank or card statement into an account: they
+> confirm how its columns, dates, and signs are read (nothing ambiguous is guessed), review every
+> row with possible duplicates flagged (within the file, from earlier imports, and in the ledger),
+> link a row to a transaction they already recorded instead of recording it twice, classify rows,
+> and import the approved ones exactly once through the transaction ledger. The statement's own
+> balances are compared with the ledger at the statement's dates, and a correction is recorded only
+> when they approve it. Transactions can carry receipts (JPEG, PNG, WebP, or PDF up to 10 MB),
+> stored privately and served only to their owner. OFX/QFX statements, bank connections, OCR, and
+> malware scanning are not part of this phase.
 
 ## Tech stack
 
@@ -39,7 +41,8 @@ calmcash/
 │   │       ├── lib/         Database client, logger, errors, request IDs, shutdown
 │   │       ├── middleware/  Request logging, validation, 404, error handler
 │   │       ├── modules/     Feature modules (health, auth, accounts, transactions, categories, tags,
-│   │       │                dashboard, budgets, recurring, subscriptions, goals)
+│   │       │                dashboard, budgets, recurring, subscriptions, goals, imports,
+│   │       │                receipts)
 │   │       └── routes/      Versioned routers (/api/v1)
 │   └── web/                 Next.js web app (TypeScript)
 │       └── src/
@@ -117,7 +120,8 @@ as **Connected**. The API health endpoints are
   e-mail tokens, rate limits, deployment model, configuration.
 - [Database design](docs/database-design.md) — model relationships, money representation, balance
   rules, transactions, categories, tags, locking, dashboard metrics, budgets, recurrence, goals,
-  constraints, migrations.
+  statement imports (duplicate rules, idempotency, reconciliation), receipts, constraints,
+  migrations.
 - [Development guide](docs/development-guide.md) — setup, commands, testing, conventions,
   troubleshooting.
 

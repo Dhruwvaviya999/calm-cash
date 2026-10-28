@@ -5,7 +5,8 @@ PostgreSQL is the system of record. The schema is defined in
 constraints Prisma cannot express — is in [`prisma/migrations/`](../prisma/migrations/).
 This document covers the Phase 1 core models, the Phase 3 authentication models, the Phase 4
 account-management rules (§3a), the Phase 5 transaction ledger (§3b), the Phase 6 dashboard
-metrics (§3c), and the Phase 7 planning models (§3d).
+metrics (§3c), the Phase 7 planning models (§3d), and the Phase 8 statement imports and receipts
+(§3e).
 
 ## 1. Entity relationships
 
@@ -29,6 +30,12 @@ erDiagram
     transactions |o--o| scheduled_occurrences : "recorded as"
     users ||--o{ savings_goals : "saves for"
     savings_goals ||--o{ goal_contributions : "allocations"
+    users ||--o{ statement_imports : uploads
+    accounts ||--o{ statement_imports : "statement of"
+    statement_imports ||--o{ statement_import_rows : "staged rows"
+    transactions |o--o| statement_import_rows : "imported as"
+    transactions |o--o{ statement_import_rows : "matched to"
+    transactions ||--o{ transaction_receipts : receipts
 
     users {
         uuid id PK
@@ -647,6 +654,142 @@ target` in basis points, uncapped (`no_target` when unavailable). With a target 
 - `completed_at` is set by the person ("Mark completed"), independent of reaching the target;
   archived goals keep their history. A goal's currency is fixed once it has contributions.
 
+## 3e. Statement imports and receipts (Phase 8)
+
+Three additive tables (migration `20261028063657_statement_imports_and_receipts`); nothing existing
+was changed. Imported rows become ordinary `transactions` through the transactions module, so every
+ledger rule of §3b applies to them unchanged.
+
+### `statement_imports` (one uploaded statement)
+
+| Column                                               | Meaning                                                                                      |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `account_id`, `currency`                             | The account the statement belongs to; amounts are read in its currency.                      |
+| `file_name`                                          | Display label only (last path segment, control characters removed, ≤ 120 characters).        |
+| `format`, `delimiter`, `has_header_row`              | `csv` only; comma, semicolon, tab, or bar; detected unless chosen at upload.                 |
+| `columns`                                            | Header names (or "Column 1", …), at most 40.                                                 |
+| `status`                                             | `mapping` → `reviewing` → `completed` or `cancelled` (a CHECK ties the final times).         |
+| `settings` (JSON)                                    | The confirmed mapping, date layout, decimal separator, and sign convention.                  |
+| `period_start/_end`, `opening/closing_balance_minor` | Typed by the person from the statement, never inferred. Signed net position (owed < 0).      |
+| `reconciled_at`, `reconciliation_difference_minor`   | The last closing-balance comparison recorded (at completion or with an approved correction). |
+| `adjustment_transaction_id`                          | The balance adjustment the person approved, if any.                                          |
+
+### `statement_import_rows` (staged rows)
+
+Each data row of the file is stored once with its raw `cells` (≤ 40 strings of ≤ 500 characters)
+and what was read from them with the batch's settings: `occurred_on`, `amount_minor` (> 0),
+`direction` (`debit` = money out of the account, `credit` = money in), `description`, `reference`,
+`counterparty`, a normalised `description_key`, `problems`/`warnings`, the editable `proposal`
+(type, category or transfer account, description, merchant, payment method, notes, tags, instant),
+`duplicates` (candidates found at the last check), `duplicate_dismissed`, and the outcome
+(`matched_transaction_id`, `imported_transaction_id`, `error`).
+
+| Status     | Meaning                                                                                      |
+| ---------- | -------------------------------------------------------------------------------------------- |
+| `invalid`  | Cannot be read with the settings (bad date, amount, or missing description). Never imported. |
+| `review`   | Readable, but has duplicate candidates; the person decides.                                  |
+| `ready`    | May be imported (expenses and income need a category; transfers need the other account).     |
+| `matched`  | Linked to an existing transaction. **No new money movement is recorded.**                    |
+| `imported` | A transaction was recorded from it.                                                          |
+| `skipped`  | Left out by the person (can be restored).                                                    |
+| `failed`   | An import attempt was refused (e.g. overdraft, archived category); kept for correction.      |
+
+CHECK constraints: a row is `matched` exactly when `matched_transaction_id` is set and `imported`
+exactly when `imported_transaction_id` is set; `failed` rows carry an `error`; every row that can
+still become a transaction has a date, an amount, and a direction. `imported_transaction_id` is
+**unique** (one transaction per row, ever), and so is `(batch_id, matched_transaction_id)`.
+
+### Reading the file
+
+- UTF-8 with or without a BOM; CRLF, LF, or CR line endings; quoted fields containing separators,
+  `""`, and line breaks. Spreadsheet (XLS/XLSX), PDF, and other binary content is refused whatever
+  the file is called.
+- Limits: 2 MB, 5,000 data rows, 40 columns, 500 characters per cell. Exceeding one refuses the
+  file with an explanation; no rows are staged.
+- Dates use one stated layout (`YYYY-MM-DD`, `DD/MM/YYYY`, `MM/DD/YYYY`, …, `DD-MMM-YY`). When the
+  sample dates fit several layouts (03/04/2026), none is preselected and the person must choose; a
+  value that does not fit the chosen layout makes that row `invalid`. A time in the cell is kept;
+  a date without one is recorded at 12:00 in the user's time zone.
+- Amounts: one signed column with an explicit convention (`negative_is_debit` or
+  `negative_is_credit`, never defaulted), or separate debit and credit columns (exactly one of the
+  two filled per row). Grouping separators, a leading or trailing minus, parentheses, a currency
+  symbol, and `Cr`/`Dr` are understood; precision is checked against the currency, never rounded.
+- Cell contents are stored and displayed as text only; nothing is evaluated.
+
+### Duplicate detection and matching
+
+Detection only suggests; nothing is dropped or merged automatically.
+
+1. **Within the statement:** the same bank reference (strong evidence), otherwise the same date,
+   amount, direction, and normalised description. Two genuine identical payments are possible, so
+   both rows are flagged for review rather than refused.
+2. **Earlier imports into the same account:** a row already imported or matched with the same
+   reference, or the same date, amount, direction, and description (`previously_imported`).
+3. **The ledger:** active transactions on the account with the same amount, currency, and money
+   direction, dated within ±3 days and not yet linked to any statement row
+   (`existing_transaction`). Amount alone is never enough; at most three candidates are shown,
+   ranked by date distance, then by shared description words.
+
+A row with candidates stays `review` until the person says "not a duplicate", matches it ("It is
+this transaction"), or skips it. A manual match is accepted only for an active transaction on the
+same account and currency, in the same direction and amount, within 31 days, that no other row is
+linked to. Matching sets `matched` and records nothing. Bank references are **not unique** in the
+database on purpose: banks reuse and omit them, so a uniqueness rule would refuse genuine rows;
+they are used as evidence instead. Candidates are evaluated when the settings are saved and on
+"Check duplicates again"; a transaction recorded elsewhere meanwhile is not noticed until then.
+Detection is heuristic: it can miss a duplicate whose amount, date, or direction differs (for
+example a card refund recorded as income).
+
+### Importing, idempotency, and concurrency
+
+`POST /imports/:id/import` takes at most 200 row IDs. Each row is recorded in its own ledger
+transaction through `transactions.recordLinked`: `claim` locks the staged row (`FOR UPDATE`) and
+returns the existing transaction if the row was imported meanwhile; the ordinary write path then
+locks the accounts and applies every ownership, archive, date, category, and balance rule; `commit`
+marks the row `imported` with the new ID, in the same transaction. The row's ID is also the
+transaction's idempotency key. Repeating the request, or sending it from several tabs at once,
+never records a row twice (an integration test sends five concurrent requests). A refused row is
+marked `failed` with the reason and the others continue; the response lists each row's outcome
+(`imported`, `already_imported`, `failed`, `not_ready`). Within a request credits are recorded
+before debits, then by date, so a payment funded by a later-listed salary is not refused by the
+overdraft rule. The mapping cannot be changed once a row is imported or matched (start a new
+import to read the file differently); the statement period and balances can.
+
+### Statement reconciliation
+
+The closing balance is compared with the ledger **at the end of the statement's last day** in the
+user's time zone (the opening balance just before its first day), so later transactions do not
+count. Dates before the account is tracked cannot be compared (`before_tracking`), nor can future
+dates. A difference is explained, not corrected: rows still staged are counted, and a correction is
+recorded only when the person approves it, through the existing reconciliation
+(`transactions.reconcile`) with the reviewed difference as `expectedAdjustmentMinor` (if the
+balance moved meanwhile, nothing is recorded: 409) and the batch ID as idempotency key. A statement
+counts as reconciled only when its closing balance was entered and matched the ledger.
+
+### Retention
+
+Completing or cancelling an import clears the raw `cells` of its rows; the batch, the values read,
+and the outcomes stay as history. Imported transactions are ordinary transactions (edit or void
+them as usual); cancelling does not remove them. The statement file itself is never stored.
+
+### `transaction_receipts`
+
+| Column                 | Meaning                                                                                  |
+| ---------------------- | ---------------------------------------------------------------------------------------- |
+| `storage_key`          | 32 random hex characters (unique); the only name used in storage. Never sent to clients. |
+| `file_name`            | Display label (sanitised like statement names).                                          |
+| `content_type`         | Decided from the content's signature: JPEG, PNG, WebP, or PDF (CHECK).                   |
+| `size_bytes`, `sha256` | 1 byte to 10 MB (CHECK); hex digest of the stored bytes.                                 |
+
+At most 10 receipts per transaction, enforced under a lock on the transaction row. Receipts never
+change the transaction or any balance; receipts of transactions on archived accounts are
+read-only. Files live in a private `FileStorage` (a local-directory adapter configured by
+`RECEIPT_STORAGE_DIR`; git-ignored `.data/receipts` in development). The file is written before
+the metadata and removed again if the metadata cannot be saved; on removal the row is deleted and
+the file removed inside one database transaction, so a storage failure keeps both (503, "nothing
+was changed"). No account or user deletion exists yet; when it is added, receipt files must be
+removed with it (a cascade deletes only the rows). Uploaded files are **not** scanned for malware.
+
 ## 4. Integrity rules
 
 ### Constraints
@@ -714,6 +857,10 @@ line of defence against a buggy code path or a manual query.
 | `scheduled_occurrences.schedule_id`           | `CASCADE`   | An occurrence has no meaning without its schedule (never orphaned).        |
 | `scheduled_occurrences.transaction_id`        | `NO ACTION` | Transactions are voided, never deleted.                                    |
 | `goal_contributions.goal_id`                  | `CASCADE`   | Contributions belong to their goal (goals are archived, not deleted).      |
+| `statement_imports.account_id`                | `NO ACTION` | Accounts are archived, never deleted, while imports refer to them.         |
+| `statement_import_rows.batch_id`              | `CASCADE`   | Staged rows belong to their import.                                        |
+| `statement_import_rows.*_transaction_id`      | `NO ACTION` | Transactions are voided, never deleted.                                    |
+| `transaction_receipts.transaction_id`         | `NO ACTION` | Same: a receipt stays with its (possibly voided) transaction.              |
 
 `NO ACTION` is used instead of `RESTRICT` on purpose. The check runs at the end of the statement,
 so deleting a user, which cascades to both transactions and accounts, still succeeds, while

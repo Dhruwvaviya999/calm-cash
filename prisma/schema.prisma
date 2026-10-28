@@ -107,6 +107,37 @@ enum RecurringFrequency {
 
 /// What the person did with one occurrence of a schedule. Occurrences nobody acted on are not
 /// stored: they are pending and follow from the schedule's rule.
+/// Where a statement import stands (see docs/database-design.md §3e).
+enum ImportBatchStatus {
+  mapping
+  reviewing
+  completed
+  cancelled
+
+  @@map("import_batch_status")
+}
+
+/// What happened to one staged statement row.
+enum ImportRowStatus {
+  invalid
+  review
+  ready
+  matched
+  imported
+  skipped
+  failed
+
+  @@map("import_row_status")
+}
+
+/// Money out of (`debit`) or into (`credit`) the imported account.
+enum StatementDirection {
+  debit
+  credit
+
+  @@map("statement_direction")
+}
+
 enum OccurrenceState {
   /// Still expected, on a later due date.
   postponed
@@ -155,6 +186,9 @@ model User {
   scheduledOccurrences ScheduledOccurrence[]
   savingsGoals         SavingsGoal[]
   goalContributions    GoalContribution[]
+  statementImports     StatementImport[]
+  statementImportRows  StatementImportRow[]
+  transactionReceipts  TransactionReceipt[]
 
   @@map("users")
 }
@@ -232,6 +266,7 @@ model Account {
   transactions       Transaction[]       @relation("TransactionAccount")
   incomingTransfers  Transaction[]       @relation("TransactionTransferAccount")
   recurringSchedules RecurringSchedule[]
+  statementImports   StatementImport[]
 
   // "Accounts of a user", optionally by status (active means archived_at IS NULL).
   @@index([userId, archivedAt])
@@ -298,14 +333,21 @@ model Transaction {
   createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt           DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  user            User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   // NO ACTION: an account with history cannot be deleted directly (archive it instead), while
   // deleting the owning user still cascades because the check runs at the end of the statement.
-  account         Account              @relation("TransactionAccount", fields: [accountId], references: [id], onDelete: NoAction)
-  transferAccount Account?             @relation("TransactionTransferAccount", fields: [transferAccountId], references: [id], onDelete: NoAction)
-  category        Category?            @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  account           Account              @relation("TransactionAccount", fields: [accountId], references: [id], onDelete: NoAction)
+  transferAccount   Account?             @relation("TransactionTransferAccount", fields: [transferAccountId], references: [id], onDelete: NoAction)
+  category          Category?            @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   /// Set when the transaction was recorded by confirming a scheduled occurrence.
-  occurrence      ScheduledOccurrence?
+  occurrence        ScheduledOccurrence?
+  /// Statement rows confirmed to be this transaction (no new money movement).
+  matchedImportRows StatementImportRow[] @relation("ImportRowMatched")
+  /// The statement row this transaction was recorded from, if any.
+  importedFromRow   StatementImportRow?  @relation("ImportRowImported")
+  receipts          TransactionReceipt[]
+  /// Statement imports whose balance correction this adjustment is.
+  reconciledImports StatementImport[]
 
   @@unique([userId, idempotencyKey])
   @@index([userId, occurredAt(sort: Desc)])
@@ -461,4 +503,116 @@ model GoalContribution {
 
   @@index([goalId, contributedOn])
   @@map("goal_contributions")
+}
+
+/// One statement upload for one account: its file structure, the confirmed column mapping, the
+/// statement's own period and balances (when the person gives them), and the reconciliation result.
+/// The file itself is never stored; only bounded, normalised rows are staged.
+model StatementImport {
+  id                            String            @id @default(uuid(7)) @db.Uuid
+  userId                        String            @map("user_id") @db.Uuid
+  accountId                     String            @map("account_id") @db.Uuid
+  /// Display label only (sanitised, bounded); never used for storage.
+  fileName                      String            @map("file_name") @db.VarChar(120)
+  format                        String            @default("csv") @db.VarChar(10)
+  delimiter                     String            @db.VarChar(1)
+  hasHeaderRow                  Boolean           @map("has_header_row")
+  /// Always the account's currency at upload; amounts are never converted.
+  currency                      String            @db.Char(3)
+  status                        ImportBatchStatus @default(mapping)
+  /// Header names (or "Column n"); bounded by CHECK constraint.
+  columns                       String[]          @default([]) @db.VarChar(500)
+  /// Confirmed mapping and parsing settings (validated with Zod on every read).
+  settings                      Json?
+  periodStart                   DateTime?         @map("period_start") @db.Date
+  periodEnd                     DateTime?         @map("period_end") @db.Date
+  openingBalanceMinor           BigInt?           @map("opening_balance_minor")
+  closingBalanceMinor           BigInt?           @map("closing_balance_minor")
+  reconciledAt                  DateTime?         @map("reconciled_at") @db.Timestamptz(3)
+  reconciliationDifferenceMinor BigInt?           @map("reconciliation_difference_minor")
+  adjustmentTransactionId       String?           @map("adjustment_transaction_id") @db.Uuid
+  completedAt                   DateTime?         @map("completed_at") @db.Timestamptz(3)
+  cancelledAt                   DateTime?         @map("cancelled_at") @db.Timestamptz(3)
+  createdAt                     DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                     DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user                  User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // NO ACTION: accounts and transactions are archived or voided, never deleted.
+  account               Account              @relation(fields: [accountId], references: [id], onDelete: NoAction)
+  adjustmentTransaction Transaction?         @relation(fields: [adjustmentTransactionId], references: [id], onDelete: NoAction)
+  rows                  StatementImportRow[]
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([accountId])
+  @@map("statement_imports")
+}
+
+/// One data row of a statement, staged for review. Raw cells are kept only while the import is
+/// open (to re-read them with new settings) and cleared when it is completed or cancelled.
+model StatementImportRow {
+  id                    String              @id @default(uuid(7)) @db.Uuid
+  userId                String              @map("user_id") @db.Uuid
+  batchId               String              @map("batch_id") @db.Uuid
+  /// Line of the row in the file.
+  rowNumber             Int                 @map("row_number")
+  cells                 String[]            @default([]) @db.VarChar(500)
+  status                ImportRowStatus
+  occurredOn            DateTime?           @map("occurred_on") @db.Date
+  /// Positive; the direction says which way the money moved.
+  amountMinor           BigInt?             @map("amount_minor")
+  direction             StatementDirection?
+  description           String              @default("") @db.VarChar(500)
+  reference             String?             @db.VarChar(500)
+  counterparty          String?             @db.VarChar(500)
+  /// Normalised description used to recognise the same entry again (lower case, no digits).
+  descriptionKey        String?             @map("description_key") @db.VarChar(120)
+  problems              Json                @default("[]")
+  warnings              Json                @default("[]")
+  /// The transaction the person will record (validated with Zod on every read).
+  proposal              Json?
+  duplicates            Json                @default("[]")
+  duplicateDismissed    Boolean             @default(false) @map("duplicate_dismissed")
+  matchedTransactionId  String?             @map("matched_transaction_id") @db.Uuid
+  /// Unique: a transaction is recorded from at most one row.
+  importedTransactionId String?             @unique @map("imported_transaction_id") @db.Uuid
+  error                 String?             @db.VarChar(500)
+  createdAt             DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user                User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  batch               StatementImport @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  matchedTransaction  Transaction?    @relation("ImportRowMatched", fields: [matchedTransactionId], references: [id], onDelete: NoAction)
+  importedTransaction Transaction?    @relation("ImportRowImported", fields: [importedTransactionId], references: [id], onDelete: NoAction)
+
+  @@unique([batchId, rowNumber])
+  /// Within one statement, a transaction is matched by at most one row.
+  @@unique([batchId, matchedTransactionId])
+  @@index([batchId, status])
+  @@index([userId, occurredOn])
+  @@index([matchedTransactionId])
+  @@map("statement_import_rows")
+}
+
+/// A receipt file attached to a transaction. The file lives in private storage under a random key;
+/// only metadata is in the database. Receipts never affect balances.
+model TransactionReceipt {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  transactionId String   @map("transaction_id") @db.Uuid
+  /// Random, server-generated; never derived from the file name and never sent to clients.
+  storageKey    String   @unique @map("storage_key") @db.Char(32)
+  fileName      String   @map("file_name") @db.VarChar(120)
+  /// Determined from the file's signature.
+  contentType   String   @map("content_type") @db.VarChar(32)
+  sizeBytes     Int      @map("size_bytes")
+  sha256        String   @db.Char(64)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // NO ACTION: transactions are voided, never deleted.
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: NoAction)
+
+  @@index([transactionId])
+  @@map("transaction_receipts")
 }

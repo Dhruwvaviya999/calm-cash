@@ -11,6 +11,7 @@ import type {
 import {
   ArrowLeftRight,
   CheckSquare,
+  FileUp,
   FolderTree,
   Plus,
   Scale,
@@ -504,6 +505,12 @@ export function TransactionsPage(): ReactNode {
         description="Every payment and receipt, with who it was for and why."
         actions={
           <>
+            <Button asChild variant="outline">
+              <Link href="/imports">
+                <FileUp aria-hidden="true" />
+                Import statement
+              </Link>
+            </Button>
             <Button
               variant="outline"
               onClick={() => {

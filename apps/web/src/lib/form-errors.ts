@@ -83,3 +83,17 @@ export function describeRequestError(error: unknown): string {
   }
   return 'Something went wrong. Please try again.';
 }
+
+/**
+ * Like `describeRequestError`, but a validation failure lists what the API said about each
+ * problem (e.g. why a file was refused), for requests without form fields to attach them to.
+ */
+export function describeRequestProblems(error: unknown): string {
+  if (error instanceof ApiClientError && error.code === 'VALIDATION_ERROR') {
+    const messages = [...new Set((error.details ?? []).map((detail) => detail.message))];
+    if (messages.length > 0) {
+      return messages.join(' ');
+    }
+  }
+  return describeRequestError(error);
+}

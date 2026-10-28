@@ -46,8 +46,8 @@ apps/
     middleware/            Request logging, origin check, validation convention, 404, error handler
     modules/<feature>/     Feature modules (routes → controller → service → repository): health, auth,
                            accounts, transactions, categories, tags, dashboard, budgets, recurring,
-                           subscriptions, goals
-    testing/               Test app factories, in-memory e-mail, integration-database harness
+                           subscriptions, goals, imports, receipts
+    testing/               Test app factories, in-memory e-mail and file storage, integration harness
     routes/v1.ts           Composition root of API v1: mounts every module router
     generated/prisma/      Generated Prisma Client (git-ignored; `pnpm db:generate`)
   web/src/
@@ -239,6 +239,7 @@ fallback). Error boundaries receive `error: unknown` and narrow it before readin
 | `SMTP_USER`, `SMTP_PASSWORD`            | API               | SMTP credentials (both or neither)         | none                         |
 | `EMAIL_FROM`                            | API               | Sender of transactional e-mail             | local placeholder            |
 | `MAILPIT_SMTP_PORT`, `MAILPIT_UI_PORT`  | Docker Compose    | Mailpit host ports                         | `1025`, `8025`               |
+| `RECEIPT_STORAGE_DIR`                   | API               | Private directory for receipt files        | `.data/receipts` (dev only)  |
 | `TEST_DATABASE_URL`                     | Integration tests | Disposable `*_test` database               | — (tests only)               |
 | `NEXT_PUBLIC_API_URL`                   | Web (build time)  | API origin, without `/api/v1`              | — (required)                 |
 
@@ -340,9 +341,11 @@ Rules that keep modules independent:
   definitions in [database-design.md §3c](./database-design.md#3c-dashboard-metrics-phase-6).
 - **Planning (Phase 7, done):** see [§16](#16-planning-phase-7) and
   [database-design.md §3d](./database-design.md#3d-budgets-recurring-schedules-subscriptions-and-goals-phase-7).
-- **Later phases** build on the same ledger: statement imports will add a source and a
-  deduplication fingerprint per row (see the database design); notifications (Phase 9) can deliver
-  the budget alerts and due payments that Phase 7 only shows in the app.
+- **Statement imports and receipts (Phase 8, done):** see
+  [§17](#17-statement-imports-and-receipts-phase-8) and
+  [database-design.md §3e](./database-design.md#3e-statement-imports-and-receipts-phase-8).
+- **Later phases** build on the same ledger: notifications (Phase 9) can deliver the budget alerts
+  and due payments that Phase 7 only shows in the app.
 
 ## 13. Accounts module (Phase 4)
 
@@ -516,3 +519,52 @@ Another user's budget, schedule, subscription, or goal answers exactly like a mi
 - **Clock and time zone.** Every service takes an injectable `now()` and reads "today" with
   `calendarDateInTimeZone(now(), caller.timeZone)`. No background job exists: due and overdue
   states are calculated on each request from persisted rules, so nothing depends on a scheduler.
+
+## 17. Statement imports and receipts (Phase 8)
+
+Two modules. Every route requires a session; state-changing routes also require the CSRF token;
+responses are `Cache-Control: no-store`. Requests are strict Zod schemas from
+`packages/shared/src/schemas/{import,receipt}.ts`. Another user's import, row, transaction, or
+receipt answers exactly like a missing one (`404`). The data model, duplicate rules, idempotency,
+and reconciliation are in [database-design.md §3e](./database-design.md#3e-statement-imports-and-receipts-phase-8).
+
+| Method & path                                                   | Purpose                                                                     |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `GET /imports` · `GET /imports/:id`                             | History (newest first); one import with sample rows and a proposed mapping  |
+| `POST /imports?accountId=&fileName=[&delimiter=&hasHeaderRow=]` | Upload a CSV statement (raw body ≤ 2 MB) → `mapping`                        |
+| `PUT /imports/:id/settings`                                     | Confirm columns, date layout, sign convention, statement info → `reviewing` |
+| `POST /imports/:id/recheck`                                     | Look for duplicates again against the current ledger                        |
+| `GET /imports/:id/rows` · `GET`/`PATCH …/rows/:rowId`           | Rows (`status`, `page`); one row; edit what will be recorded                |
+| `POST …/rows/:rowId/decision`                                   | `match` · `not_duplicate` · `skip` · `restore`                              |
+| `POST …/rows/classify`                                          | One category on several rows                                                |
+| `POST /imports/:id/import`                                      | Record ≤ 200 rows; idempotent; partial success reported per row             |
+| `GET …/reconciliation` · `POST …/reconciliation/adjustment`     | Balances at the statement's dates; the approved correction                  |
+| `POST /imports/:id/complete` · `…/cancel`                       | Finish (raw cells discarded) or abandon (imported transactions stay)        |
+| `GET`/`POST /transactions/:id/receipts`                         | Receipt metadata; upload one receipt (raw body ≤ 10 MB, `?fileName=`)       |
+| `GET …/receipts/:receiptId/file` · `DELETE …/:receiptId`        | Stream the file (owner only); remove it                                     |
+
+- **Imports** (`modules/imports`): `csv-parser.ts` (bounded RFC 4180 reader; refuses binary,
+  spreadsheet, and PDF content) · `statement-reader.ts` (dates in a stated layout, amounts with a
+  stated sign convention or split columns, proposals from header names; pure) ·
+  `duplicate-detection.ts` (the three checks; pure) · `row-evaluation.ts` (rows → status, proposal,
+  candidates; pure) · repository (batch and row locks, bulk row updates with `unnest`) · service ·
+  mapper · controller · routes. Raw bodies are read with `express.raw` (no multipart parser) behind
+  a per-user upload rate limit (60 uploads per 10 minutes, in memory).
+- **Recording money.** Importing calls `transactions.recordLinked(caller, input, { claim, commit },
+{ idempotencyKey: row.id })`, exactly like recurring payments (§16): the import module never writes
+  transactions or balances. Lock order is the staged row, then the accounts (by ID). The approved
+  reconciliation correction calls `transactions.reconcile` with the batch ID as idempotency key.
+- **Receipts** (`modules/receipts`): `file-signature.ts` (JPEG, PNG, WebP, and PDF by magic bytes
+  and structure; the declared type and the file-name extension must agree with the content) ·
+  repository (per-transaction lock for the 10-receipt limit) · service · routes. Storage goes
+  through `lib/file-storage.ts` (`FileStorage`: `put`, `read`, `remove`), whose local adapter keeps
+  files under `RECEIPT_STORAGE_DIR` with random 32-hex keys, sharded by prefix, created
+  exclusively (never overwritten) with owner-only permissions where the platform supports them,
+  and refuses any key that is not 32 hex characters. Tests use an
+  in-memory adapter. Files are served with `nosniff`, `Content-Security-Policy: default-src 'none';
+img-src 'self'; sandbox`, `private, no-store`, and a sanitised `Content-Disposition`; PDFs are
+  always attachments.
+- **Limitations (documented, not hidden).** CSV only (no OFX/QFX, PDF, or bank connection); no
+  malware scanning of receipts; the local storage adapter needs a persistent, private, backed-up
+  volume (object storage is a later adapter); upload rate limits are per process; statements are
+  never sent to any external service, AI or otherwise.

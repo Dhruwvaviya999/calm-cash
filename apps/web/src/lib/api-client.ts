@@ -45,6 +45,8 @@ export interface ApiRequestOptions<TSchema extends z.ZodType> {
   method?: HttpMethod;
   /** Serialized as JSON. */
   body?: unknown;
+  /** A file sent as the raw request body instead of JSON (uploads). */
+  file?: Blob;
   signal?: AbortSignal | undefined;
   headers?: Readonly<Record<string, string>>;
 }
@@ -55,6 +57,11 @@ export interface ApiClient {
     path: `/${string}`,
     options: ApiRequestOptions<TSchema>,
   ) => Promise<z.output<TSchema>>;
+  /**
+   * Fetches a private file (with the session cookie) as a `Blob`, e.g. a receipt to preview or
+   * save. Errors are reported exactly like `request`.
+   */
+  download: (path: `/${string}`, signal?: AbortSignal) => Promise<Blob>;
 }
 
 export interface ApiClientConfig {
@@ -98,7 +105,7 @@ export function createApiClient({
     options: ApiRequestOptions<TSchema>,
     allowCsrfRetry: boolean,
   ): Promise<z.output<TSchema>> => {
-    const { schema, method = 'GET', body, signal, headers } = options;
+    const { schema, method = 'GET', body, file, signal, headers } = options;
     const csrfToken = method === 'GET' ? undefined : getCsrfToken?.();
 
     let response: Response;
@@ -109,11 +116,15 @@ export function createApiClient({
         credentials: 'include',
         headers: {
           Accept: 'application/json',
-          ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+          ...(file !== undefined
+            ? { 'Content-Type': file.type === '' ? 'application/octet-stream' : file.type }
+            : body === undefined
+              ? {}
+              : { 'Content-Type': 'application/json' }),
           ...(csrfToken === undefined ? {} : { [CSRF_TOKEN_HEADER]: csrfToken }),
           ...headers,
         },
-        body: body === undefined ? null : JSON.stringify(body),
+        body: file ?? (body === undefined ? null : JSON.stringify(body)),
         signal: signal ?? null,
       });
     } catch (error: unknown) {
@@ -177,7 +188,52 @@ export function createApiClient({
     return data.data;
   };
 
+  const download = async (path: `/${string}`, signal?: AbortSignal): Promise<Blob> => {
+    let response: Response;
+    try {
+      response = await fetchImpl(`${apiRoot}${path}`, {
+        method: 'GET',
+        credentials: 'include',
+        signal: signal ?? null,
+      });
+    } catch (error: unknown) {
+      if (signal?.aborted === true) {
+        throw error;
+      }
+      throw new ApiClientError({
+        code: 'NETWORK_ERROR',
+        message: 'Unable to reach the CalmCash API.',
+        cause: error,
+      });
+    }
+    const requestId = response.headers.get(REQUEST_ID_HEADER) ?? undefined;
+    if (!response.ok) {
+      const parsedError = apiErrorResponseSchema.safeParse(await readJson(response));
+      if (parsedError.success) {
+        const { code, message, details, requestId: errorRequestId } = parsedError.data.error;
+        if (code === 'UNAUTHORIZED') {
+          onUnauthorized?.();
+        }
+        throw new ApiClientError({
+          code,
+          message,
+          details,
+          status: response.status,
+          requestId: errorRequestId ?? requestId,
+        });
+      }
+      throw new ApiClientError({
+        code: 'INVALID_RESPONSE',
+        message: `The API responded with an unexpected ${response.status} error.`,
+        status: response.status,
+        requestId,
+      });
+    }
+    return response.blob();
+  };
+
   return {
     request: (path, options) => send(path, options, true),
+    download,
   };
 }

@@ -27,7 +27,11 @@ describe('navigation config', () => {
       'Budgets',
       'Accounts',
     ]);
-    expect(getMobileMoreItems().map((item) => item.id)).toEqual(['insights', 'settings']);
+    expect(getMobileMoreItems().map((item) => item.id)).toEqual([
+      'insights',
+      'imports',
+      'settings',
+    ]);
   });
 });
 

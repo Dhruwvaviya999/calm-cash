@@ -1,6 +1,7 @@
 import { Router } from 'express';
 
 import type { DatabaseHealthCheck } from '../lib/database';
+import type { Logger } from '../lib/logger';
 import {
   createAccountsRouter,
   type AccountsModuleDependencies,
@@ -26,6 +27,14 @@ import {
 import { createGoalsRouter, type GoalsModuleDependencies } from '../modules/goals/goals.routes';
 import { createHealthRouter } from '../modules/health/health.routes';
 import {
+  createImportsRouter,
+  type ImportsModuleDependencies,
+} from '../modules/imports/imports.routes';
+import {
+  createReceiptsRouter,
+  type ReceiptsModuleDependencies,
+} from '../modules/receipts/receipts.routes';
+import {
   createRecurringRouter,
   createRecurringService,
   type RecurringModuleDependencies,
@@ -40,6 +49,7 @@ import { createTransactionsService } from '../modules/transactions';
 
 export interface V1RouterDependencies {
   checkDatabase: DatabaseHealthCheck;
+  logger: Logger;
   auth: AuthModuleDependencies;
   authConfig: AuthModuleConfig;
   accounts: AccountsModuleDependencies;
@@ -50,6 +60,8 @@ export interface V1RouterDependencies {
   budgets: BudgetsModuleDependencies;
   recurring: RecurringModuleDependencies;
   goals: GoalsModuleDependencies;
+  imports: ImportsModuleDependencies;
+  receipts: ReceiptsModuleDependencies;
 }
 
 /**
@@ -69,6 +81,11 @@ export function createV1Router(dependencies: V1RouterDependencies): Router {
     getCaller: auth.getCaller,
   };
   router.use('/accounts', createAccountsRouter(dependencies.accounts, boundary));
+  // Receipts live under their transaction; mounted first so the transaction routes never see them.
+  router.use(
+    '/transactions/:transactionId/receipts',
+    createReceiptsRouter(dependencies.receipts, dependencies.logger, boundary),
+  );
   router.use('/transactions', createTransactionsRouter(dependencies.transactions, boundary));
   router.use('/categories', createCategoriesRouter(dependencies.categories, boundary));
   router.use('/tags', createTagsRouter(dependencies.tags, boundary));
@@ -86,18 +103,24 @@ export function createV1Router(dependencies: V1RouterDependencies): Router {
   // transactions module's ledger, so every lock and balance rule of ordinary entry applies.
   router.use('/budgets', createBudgetsRouter(dependencies.budgets, boundary));
   const recurringNow = dependencies.recurring.now ?? ((): Date => new Date());
+  // One transactions service for every module that turns plans or statements into real money.
+  const transactions = createTransactionsService({
+    repository: dependencies.transactions.repository,
+    now: dependencies.transactions.now ?? recurringNow,
+  });
   const recurring = createRecurringService({
     repository: dependencies.recurring.repository,
-    transactions: createTransactionsService({
-      repository: dependencies.transactions.repository,
-      now: dependencies.transactions.now ?? recurringNow,
-    }),
+    transactions,
     now: recurringNow,
   });
   router.use('/recurring', createRecurringRouter(recurring, boundary));
   // Subscriptions are recurring expense schedules: the same service behind scoped routes.
   router.use('/subscriptions', createSubscriptionsRouter(recurring, boundary));
   router.use('/goals', createGoalsRouter(dependencies.goals, boundary));
+
+  // Statement imports (Phase 8): approved rows and balance corrections are recorded only through
+  // the transactions service, with its locks and rules.
+  router.use('/imports', createImportsRouter(dependencies.imports, transactions, boundary));
 
   return router;
 }

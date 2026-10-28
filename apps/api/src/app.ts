@@ -21,6 +21,8 @@ import type { BudgetsModuleDependencies } from './modules/budgets/budgets.routes
 import type { CategoriesModuleDependencies } from './modules/categories/categories.routes';
 import type { DashboardModuleDependencies } from './modules/dashboard/dashboard.routes';
 import type { GoalsModuleDependencies } from './modules/goals/goals.routes';
+import type { ImportsModuleDependencies } from './modules/imports/imports.routes';
+import type { ReceiptsModuleDependencies } from './modules/receipts/receipts.routes';
 import type { RecurringModuleDependencies } from './modules/recurring';
 import type { TagsModuleDependencies } from './modules/tags/tags.routes';
 import type { TransactionsModuleDependencies } from './modules/transactions/transactions.routes';
@@ -42,6 +44,8 @@ export interface AppDependencies {
   budgets: BudgetsModuleDependencies;
   recurring: RecurringModuleDependencies;
   goals: GoalsModuleDependencies;
+  imports: ImportsModuleDependencies;
+  receipts: ReceiptsModuleDependencies;
 }
 
 /**
@@ -62,6 +66,8 @@ export function createApp({
   budgets,
   recurring,
   goals,
+  imports,
+  receipts,
 }: AppDependencies): Express {
   const app = express();
 
@@ -94,6 +100,7 @@ export function createApp({
     API_V1_PREFIX,
     createV1Router({
       checkDatabase,
+      logger,
       auth,
       accounts,
       transactions,
@@ -103,6 +110,8 @@ export function createApp({
       budgets,
       recurring,
       goals,
+      imports,
+      receipts,
       authConfig: { session: config.session, webAppUrl: config.webAppUrl },
     }),
   );

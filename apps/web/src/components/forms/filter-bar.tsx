@@ -55,7 +55,9 @@ export function FilterOptions<TValue extends string>({
       <legend className="sr-only">{legend}</legend>
       <div className="-mx-1 flex [scrollbar-width:none] gap-1.5 overflow-x-auto px-1 py-0.5">
         {options.map((option) => (
-          <label key={option.value} className="shrink-0">
+          // `relative` keeps the visually hidden radio inside the scrolling row; otherwise it is
+          // positioned against the page and widens it when the options overflow.
+          <label key={option.value} className="relative shrink-0">
             <input
               type="radio"
               name={name}

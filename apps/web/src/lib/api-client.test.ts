@@ -122,6 +122,84 @@ describe('createApiClient', () => {
   });
 });
 
+describe('files', () => {
+  it('sends an uploaded file as the raw body with its own content type', async () => {
+    const { client, fetchMock } = clientReturning(jsonResponse({ success: true, data: HEALTH }));
+    const file = new Blob(['Date,Amount'], { type: 'text/csv' });
+
+    await client.request('/imports?fileName=a.csv', {
+      schema: healthCheckDtoSchema,
+      method: 'POST',
+      file,
+    });
+
+    const init = fetchMock.mock.calls[0]?.[1];
+    expect(init?.body).toBe(file);
+    expect(init?.headers).toMatchObject({ 'Content-Type': 'text/csv' });
+  });
+
+  it('labels a file without a type as octet-stream, never as JSON', async () => {
+    const { client, fetchMock } = clientReturning(jsonResponse({ success: true, data: HEALTH }));
+
+    await client.request('/receipts', {
+      schema: healthCheckDtoSchema,
+      method: 'POST',
+      file: new Blob([new Uint8Array([1, 2, 3])]),
+    });
+
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      'Content-Type': 'application/octet-stream',
+    });
+  });
+
+  it('downloads a private file with the session cookie', async () => {
+    const { client, fetchMock } = clientReturning(
+      new Response(new Uint8Array([137, 80, 78, 71]), {
+        status: 200,
+        headers: { 'Content-Type': 'image/png' },
+      }),
+    );
+
+    const blob = await client.download('/transactions/t/receipts/r/file');
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'http://api.test/api/v1/transactions/t/receipts/r/file',
+    );
+    expect(fetchMock.mock.calls[0]?.[1]?.credentials).toBe('include');
+    expect(blob.type).toBe('image/png');
+    expect(new Uint8Array(await blob.arrayBuffer())).toEqual(new Uint8Array([137, 80, 78, 71]));
+  });
+
+  it('reports a failed download like any other request', async () => {
+    const onUnauthorized = vi.fn();
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { success: false, error: { code: 'NOT_FOUND', message: 'No such receipt.' } },
+          404,
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { success: false, error: { code: 'UNAUTHORIZED', message: 'Signed out.' } },
+          401,
+        ),
+      );
+    const client = createApiClient({
+      baseUrl: 'http://api.test',
+      fetch: fetchMock,
+      onUnauthorized,
+    });
+
+    const missing = await captureError(client.download('/x'));
+    await captureError(client.download('/y'));
+
+    expect(missing).toMatchObject({ code: 'NOT_FOUND', status: 404, message: 'No such receipt.' });
+    expect(onUnauthorized).toHaveBeenCalledOnce();
+  });
+});
+
 describe('session integration', () => {
   const TOKEN = 't'.repeat(43);
   const csrfError = (): Response =>

@@ -95,8 +95,8 @@ export default defineConfig(
   {
     files: [
       'apps/web/src/{components,hooks,lib,services,types}/**/*.{ts,tsx}',
-      'apps/web/src/features/{dashboard,accounts,transactions,budgets,recurring,subscriptions,goals,planning}/**/*.{ts,tsx}',
-      'apps/web/src/app/*/{dashboard,accounts,transactions,budgets}/**/*.{ts,tsx}',
+      'apps/web/src/features/{dashboard,accounts,transactions,budgets,recurring,subscriptions,goals,planning,imports,receipts}/**/*.{ts,tsx}',
+      'apps/web/src/app/*/{dashboard,accounts,transactions,budgets,imports}/**/*.{ts,tsx}',
     ],
     rules: {
       'no-restricted-imports': [

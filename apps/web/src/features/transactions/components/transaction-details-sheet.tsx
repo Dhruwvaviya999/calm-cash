@@ -16,6 +16,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
+import { ReceiptsPanel } from '@/features/receipts';
 import { formatDateTime } from '@/lib/format';
 import { PAYMENT_METHOD_LABELS, TRANSACTION_TYPE_PRESENTATION } from '@/lib/finance-presentation';
 
@@ -39,7 +40,7 @@ function Row({ label, children }: { label: string; children: ReactNode }): React
   );
 }
 
-/** Everything recorded about one transaction, with edit, void, and restore. */
+/** Everything recorded about one transaction, with edit, void, restore, and its receipts. */
 export function TransactionDetailsSheet({
   item,
   timeZone,
@@ -205,6 +206,13 @@ function Details({
             )}
           </div>
         )}
+
+        <ReceiptsPanel
+          key={transaction.id}
+          transactionId={transaction.id}
+          timeZone={timeZone}
+          readOnly={archived}
+        />
       </div>
     </>
   );

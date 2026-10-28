@@ -108,6 +108,7 @@ export interface TransactionsService {
     caller: Caller,
     input: CreateTransactionInput,
     link: LinkedRecording,
+    options?: { idempotencyKey?: string },
   ) => Promise<WriteOutcome>;
 }
 
@@ -597,7 +598,7 @@ export function createTransactionsService({
       });
     },
 
-    recordLinked: async (caller, input, link) => {
+    recordLinked: async (caller, input, link, options = {}) => {
       const at = now();
       const { id, replayed } = await repository.inLedger(async (ledger) => {
         // The linked rows are locked before any account, so this write queues behind (and then
@@ -612,7 +613,8 @@ export function createTransactionsService({
           input,
           at,
           undefined,
-          async (write) => (await ledger.insert(caller.userId, write, null, at)).id,
+          async (write) =>
+            (await ledger.insert(caller.userId, write, options.idempotencyKey ?? null, at)).id,
         );
         await link.commit(ledger.client, transactionId);
         return { id: transactionId, replayed: false };

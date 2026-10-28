@@ -10,6 +10,9 @@ import { createPrismaBudgetsRepository } from '../modules/budgets/budgets.reposi
 import { createPrismaCategoriesRepository } from '../modules/categories/categories.repository';
 import { createPrismaDashboardRepository } from '../modules/dashboard/dashboard.repository';
 import { createPrismaGoalsRepository } from '../modules/goals/goals.repository';
+import { createPrismaImportsRepository } from '../modules/imports/imports.repository';
+import { createPrismaReceiptsRepository } from '../modules/receipts/receipts.repository';
+import { createInMemoryFileStorage } from './in-memory-storage';
 import { createPrismaRecurringRepository } from '../modules/recurring';
 import { createPrismaTagsRepository } from '../modules/tags/tags.repository';
 import { createPrismaTransactionsRepository } from '../modules/transactions/transactions.repository';
@@ -75,6 +78,11 @@ export function createTestApp(overrides: Partial<AppDependencies> = {}): Express
     budgets: { repository: createPrismaBudgetsRepository(offline) },
     recurring: { repository: createPrismaRecurringRepository(offline) },
     goals: { repository: createPrismaGoalsRepository(offline) },
+    imports: { repository: createPrismaImportsRepository(offline) },
+    receipts: {
+      repository: createPrismaReceiptsRepository(offline),
+      storage: createInMemoryFileStorage(),
+    },
     ...overrides,
   });
 }

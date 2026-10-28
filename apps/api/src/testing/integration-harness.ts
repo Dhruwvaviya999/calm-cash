@@ -23,6 +23,13 @@ import { createPrismaBudgetsRepository } from '../modules/budgets/budgets.reposi
 import { createPrismaCategoriesRepository } from '../modules/categories/categories.repository';
 import { createPrismaDashboardRepository } from '../modules/dashboard/dashboard.repository';
 import { createPrismaGoalsRepository } from '../modules/goals/goals.repository';
+import {
+  createPrismaImportsRepository,
+  type ImportsRepository,
+} from '../modules/imports/imports.repository';
+import { createPrismaReceiptsRepository } from '../modules/receipts/receipts.repository';
+import type { FileStorage } from '../lib/file-storage';
+import { createInMemoryFileStorage, type InMemoryFileStorage } from './in-memory-storage';
 import { createPrismaRecurringRepository, type RecurringRepository } from '../modules/recurring';
 import { createPrismaTagsRepository } from '../modules/tags/tags.repository';
 import {
@@ -71,6 +78,8 @@ function createTestClock(): TestClock {
 
 export interface TestContext {
   app: Express;
+  /** Receipt files written by this app. */
+  storage: InMemoryFileStorage;
   prisma: PrismaClient;
   repository: AuthRepository;
   email: InMemoryEmailService;
@@ -86,6 +95,10 @@ export interface TestContextOptions {
   transactionsRepository?: (real: TransactionsRepository) => TransactionsRepository;
   /** Wraps the real recurring repository, e.g. to inject a failure while recording a payment. */
   recurringRepository?: (real: RecurringRepository) => RecurringRepository;
+  /** Wraps the real imports repository, e.g. to inject a failure while importing a row. */
+  importsRepository?: (real: ImportsRepository) => ImportsRepository;
+  /** Wraps the in-memory receipt storage, e.g. to make removals fail. */
+  receiptStorage?: (real: InMemoryFileStorage) => FileStorage;
 }
 
 /**
@@ -116,6 +129,7 @@ export function useIntegrationDatabase(): {
       const email = createInMemoryEmailService();
       const tasks = createBackgroundTasks(logger);
       const repository = createPrismaAuthRepository(prisma);
+      const storage = createInMemoryFileStorage();
       const app = createApp({
         config: { ...TEST_APP_CONFIG, jsonBodyLimit: '10kb' },
         logger,
@@ -151,8 +165,21 @@ export function useIntegrationDatabase(): {
           now: clock.now,
         },
         goals: { repository: createPrismaGoalsRepository(prisma), now: clock.now },
+        imports: {
+          repository: (options.importsRepository ?? ((real) => real))(
+            createPrismaImportsRepository(prisma),
+          ),
+          now: clock.now,
+          uploadRate: { limit: 10_000, windowMs: 60_000 },
+        },
+        receipts: {
+          repository: createPrismaReceiptsRepository(prisma),
+          storage: (options.receiptStorage ?? ((real) => real))(storage),
+          now: clock.now,
+          uploadRate: { limit: 10_000, windowMs: 60_000 },
+        },
       });
-      return { app, prisma, repository, email, clock, tasks };
+      return { app, prisma, repository, email, clock, tasks, storage };
     },
   };
 }

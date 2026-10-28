@@ -1,5 +1,6 @@
 import {
   ArrowLeftRight,
+  FileUp,
   LayoutDashboard,
   PiggyBank,
   Settings,
@@ -13,7 +14,7 @@ import type { Route } from 'next';
 // the mobile "More" sheet, and the header context all read from this list.
 
 export type NavItemId =
-  'dashboard' | 'transactions' | 'budgets' | 'accounts' | 'insights' | 'settings';
+  'dashboard' | 'transactions' | 'imports' | 'budgets' | 'accounts' | 'insights' | 'settings';
 export type NavGroupId = 'overview' | 'manage' | 'system';
 
 export interface NavItem {
@@ -71,6 +72,16 @@ export const NAV_ITEMS: readonly NavItem[] = [
     icon: ArrowLeftRight,
     group: 'manage',
     mobilePlacement: 'bar',
+  },
+  {
+    id: 'imports',
+    href: '/imports',
+    label: 'Statement imports',
+    mobileLabel: 'Imports',
+    description: 'Bring in a bank statement, row by row',
+    icon: FileUp,
+    group: 'manage',
+    mobilePlacement: 'more',
   },
   {
     id: 'budgets',

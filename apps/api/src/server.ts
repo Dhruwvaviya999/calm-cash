@@ -13,6 +13,9 @@ import { createPrismaBudgetsRepository } from './modules/budgets/budgets.reposit
 import { createPrismaCategoriesRepository } from './modules/categories/categories.repository';
 import { createPrismaDashboardRepository } from './modules/dashboard/dashboard.repository';
 import { createPrismaGoalsRepository } from './modules/goals/goals.repository';
+import { createPrismaImportsRepository } from './modules/imports/imports.repository';
+import { createPrismaReceiptsRepository } from './modules/receipts/receipts.repository';
+import { createLocalFileStorage } from './lib/file-storage';
 import { createPrismaRecurringRepository } from './modules/recurring';
 import { createPrismaTagsRepository } from './modules/tags/tags.repository';
 import { createPrismaTransactionsRepository } from './modules/transactions/transactions.repository';
@@ -61,6 +64,11 @@ const app = createApp({
   budgets: { repository: createPrismaBudgetsRepository(prisma) },
   recurring: { repository: createPrismaRecurringRepository(prisma) },
   goals: { repository: createPrismaGoalsRepository(prisma) },
+  imports: { repository: createPrismaImportsRepository(prisma) },
+  receipts: {
+    repository: createPrismaReceiptsRepository(prisma),
+    storage: createLocalFileStorage(config.receiptStorageDir),
+  },
 });
 
 const stopSessionCleanup = scheduleSessionCleanup({

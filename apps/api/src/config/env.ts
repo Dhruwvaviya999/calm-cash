@@ -49,11 +49,16 @@ export interface AppConfig {
   shutdownTimeoutMs: number;
   session: SessionConfig;
   email: EmailConfig;
+  /** Private directory for receipt files (relative paths resolve against the working directory). */
+  receiptStorageDir: string;
 }
 
 const DEVELOPMENT_SESSION_COOKIE = 'calmcash_session';
 /** `__Host-` cookies must be Secure, have `Path=/`, and no `Domain`, so they stay host-only. */
 const PRODUCTION_SESSION_COOKIE = '__Host-calmcash_session';
+
+/** Development default; ignored by Git. */
+const DEFAULT_RECEIPT_STORAGE_DIR = '.data/receipts';
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -113,6 +118,7 @@ const envSchema = z
     SMTP_USER: optionalString,
     SMTP_PASSWORD: optionalString,
     EMAIL_FROM: optionalString,
+    RECEIPT_STORAGE_DIR: optionalString,
   })
   .superRefine((env, context) => {
     const production = env.NODE_ENV === 'production';
@@ -151,6 +157,14 @@ const envSchema = z
           });
           break;
         }
+      }
+      // Receipts must live on persistent, private storage in production, never a default path.
+      if (env.RECEIPT_STORAGE_DIR === undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['RECEIPT_STORAGE_DIR'],
+          message: 'Required in production (a private directory on a persistent volume).',
+        });
       }
       // Development defaults point at the local Mailpit catcher; production must say where mail goes.
       for (const name of ['SMTP_HOST', 'EMAIL_FROM'] as const) {
@@ -221,6 +235,7 @@ export function parseEnv(source: Readonly<Record<string, string | undefined>>): 
               : { user: env.SMTP_USER, password: env.SMTP_PASSWORD },
         },
       },
+      receiptStorageDir: env.RECEIPT_STORAGE_DIR ?? DEFAULT_RECEIPT_STORAGE_DIR,
     },
   };
 }

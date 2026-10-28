@@ -36,3 +36,6 @@ Thumbs.db
 # Misc
 *.pem
 .vercel
+
+# Private local file storage (receipts)
+.data/

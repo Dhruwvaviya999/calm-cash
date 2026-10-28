@@ -16,6 +16,7 @@ const PRODUCTION_ENV = {
   SMTP_USER: 'calmcash',
   SMTP_PASSWORD: 'smtp-secret',
   EMAIL_FROM: 'CalmCash <no-reply@calmcash.example>',
+  RECEIPT_STORAGE_DIR: '/var/lib/calmcash/receipts',
 } as const;
 
 function issuesOf(result: ReturnType<typeof parseEnv>): string {
@@ -55,6 +56,7 @@ describe('parseEnv', () => {
             auth: undefined,
           },
         },
+        receiptStorageDir: '.data/receipts',
       },
     });
   });
@@ -68,6 +70,7 @@ describe('parseEnv', () => {
       WEB_APP_URL: 'https://app.calmcash.example',
       SMTP_HOST: 'smtp.mail.example',
       EMAIL_FROM: 'CalmCash <no-reply@calmcash.example>',
+      RECEIPT_STORAGE_DIR: '/var/lib/calmcash/receipts',
     });
 
     expect(result.success && result.config.port).toBe(8080);
@@ -134,6 +137,7 @@ describe('parseEnv', () => {
     expect(issues).toContain('CORS_ORIGINS: Production origins must use https.');
     expect(issues).toContain('SMTP_HOST');
     expect(issues).toContain('EMAIL_FROM');
+    expect(issues).toContain('RECEIPT_STORAGE_DIR');
   });
 
   it('keeps the web app origin inside the CORS allow-list', () => {
