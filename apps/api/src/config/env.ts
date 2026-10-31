@@ -43,8 +43,11 @@ export interface AppConfig {
   shutdownTimeoutMs: number;
   session: SessionConfig;
   email: EmailConfig;
-  /** Private directory for receipt files (relative paths resolve against the working directory). */
+  /** Local provider only; relative paths resolve against the working directory. */
   receiptStorageDir: string;
+  receiptStorageProvider: 'local' | 'vercel-blob';
+  /** Server-only credential; never included in response DTOs or logs. */
+  blobReadWriteToken: string | undefined;
 }
 
 const DEVELOPMENT_SESSION_COOKIE = 'calmcash_session';
@@ -102,6 +105,9 @@ const envSchema = z
       .default(72),
     ...emailEnvFields,
     RECEIPT_STORAGE_DIR: optionalString,
+    RECEIPT_STORAGE_PROVIDER: z.enum(['local', 'vercel-blob']).default('local'),
+    BLOB_READ_WRITE_TOKEN: optionalString,
+    VERCEL: z.string().optional(),
   })
   .superRefine((env, context) => {
     const production = env.NODE_ENV === 'production';
@@ -123,6 +129,15 @@ const envSchema = z
     }
     checkEmailEnv(env, context);
 
+    if (env.RECEIPT_STORAGE_PROVIDER === 'vercel-blob' && env.BLOB_READ_WRITE_TOKEN === undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['BLOB_READ_WRITE_TOKEN'],
+        message:
+          'Required with RECEIPT_STORAGE_PROVIDER=vercel-blob; connect a private Blob store.',
+      });
+    }
+
     if (production) {
       // Secure cookies only reach the API over HTTPS, and e-mailed links must be HTTPS too.
       for (const origin of env.CORS_ORIGINS) {
@@ -136,11 +151,18 @@ const envSchema = z
         }
       }
       // Receipts must live on persistent, private storage in production, never a default path.
-      if (env.RECEIPT_STORAGE_DIR === undefined) {
+      if (env.RECEIPT_STORAGE_PROVIDER === 'local' && env.RECEIPT_STORAGE_DIR === undefined) {
         context.addIssue({
           code: 'custom',
           path: ['RECEIPT_STORAGE_DIR'],
           message: 'Required in production (a private directory on a persistent volume).',
+        });
+      }
+      if (env.VERCEL === '1' && env.RECEIPT_STORAGE_PROVIDER === 'local') {
+        context.addIssue({
+          code: 'custom',
+          path: ['RECEIPT_STORAGE_PROVIDER'],
+          message: 'Use vercel-blob on Vercel; local receipt storage is not persistent.',
         });
       }
     }
@@ -162,7 +184,13 @@ export type EnvParseResult =
  * never include the supplied value, so secrets such as DATABASE_URL cannot leak into logs.
  */
 export function parseEnv(source: Readonly<Record<string, string | undefined>>): EnvParseResult {
-  const result = envSchema.safeParse(source);
+  const result = envSchema.safeParse({
+    ...source,
+    // `vercel dev` assigns a port to each backend. It takes precedence over a local API_PORT.
+    ...(source.VERCEL === '1'
+      ? { API_HOST: '0.0.0.0', API_PORT: source.PORT ?? source.API_PORT }
+      : {}),
+  });
 
   if (!result.success) {
     return { success: false, issues: describeEnvIssues(result.error) };
@@ -193,6 +221,8 @@ export function parseEnv(source: Readonly<Record<string, string | undefined>>): 
       },
       email: toEmailConfig(env),
       receiptStorageDir: env.RECEIPT_STORAGE_DIR ?? DEFAULT_RECEIPT_STORAGE_DIR,
+      receiptStorageProvider: env.RECEIPT_STORAGE_PROVIDER,
+      blobReadWriteToken: env.BLOB_READ_WRITE_TOKEN,
     },
   };
 }

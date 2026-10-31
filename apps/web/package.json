@@ -4,6 +4,9 @@
   "private": true,
   "description": "CalmCash web client (Next.js App Router + TypeScript).",
   "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
     "dev": "next dev --port 3000",
     "build": "next build",

@@ -116,7 +116,7 @@ export function createReceiptsService({
         throw refuse('Choose a receipt file.');
       }
       if (content.length > MAX_RECEIPT_BYTES) {
-        throw new AppError(413, 'PAYLOAD_TOO_LARGE', 'Receipts can be at most 10 MB.');
+        throw new AppError(413, 'PAYLOAD_TOO_LARGE', 'Receipts can be at most 4 MB.');
       }
       const contentType = detectReceiptType(content);
       if (contentType === undefined) {

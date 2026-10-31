@@ -4,6 +4,9 @@
   "private": true,
   "description": "CalmCash REST API (Express + TypeScript).",
   "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
   "exports": {
     "./automation": "./src/automation/index.ts"
   },
@@ -20,6 +23,8 @@
     "@calmcash/shared": "workspace:*",
     "@prisma/adapter-pg": "catalog:",
     "@prisma/client": "catalog:",
+    "@vercel/blob": "^2.8.2",
+    "@vercel/functions": "^3.10.5",
     "argon2": "^0.45.1",
     "cors": "^2.8.6",
     "express": "^5.3.0",

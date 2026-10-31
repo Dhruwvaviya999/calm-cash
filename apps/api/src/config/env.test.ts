@@ -25,6 +25,37 @@ function issuesOf(result: ReturnType<typeof parseEnv>): string {
 }
 
 describe('parseEnv', () => {
+  it('uses the assigned Vercel port before the standalone local API port', () => {
+    const result = parseEnv({ ...VALID_ENV, VERCEL: '1', PORT: '5123', API_PORT: '4000' });
+    expect(result).toMatchObject({ success: true, config: { host: '0.0.0.0', port: 5123 } });
+  });
+
+  it('allows private Blob storage in production without a persistent local directory', () => {
+    const result = parseEnv({
+      ...PRODUCTION_ENV,
+      VERCEL: '1',
+      RECEIPT_STORAGE_PROVIDER: 'vercel-blob',
+      RECEIPT_STORAGE_DIR: '',
+      BLOB_READ_WRITE_TOKEN: 'test-server-only-token',
+    });
+    expect(result).toMatchObject({
+      success: true,
+      config: {
+        receiptStorageProvider: 'vercel-blob',
+        blobReadWriteToken: 'test-server-only-token',
+      },
+    });
+  });
+
+  it('requires a Blob token and rejects ephemeral local storage on Vercel production', () => {
+    expect(
+      issuesOf(parseEnv({ ...PRODUCTION_ENV, RECEIPT_STORAGE_PROVIDER: 'vercel-blob' })),
+    ).toContain('BLOB_READ_WRITE_TOKEN');
+    expect(issuesOf(parseEnv({ ...PRODUCTION_ENV, VERCEL: '1' }))).toContain(
+      'RECEIPT_STORAGE_PROVIDER',
+    );
+  });
+
   it('applies documented defaults for optional variables', () => {
     const result = parseEnv(VALID_ENV);
 
@@ -59,6 +90,8 @@ describe('parseEnv', () => {
           },
         },
         receiptStorageDir: '.data/receipts',
+        receiptStorageProvider: 'local',
+        blobReadWriteToken: undefined,
       },
     });
   });

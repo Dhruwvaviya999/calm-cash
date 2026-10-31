@@ -71,17 +71,17 @@ describe('ReceiptsPanel', () => {
     expect(await screen.findByText('taxi.png')).toBeTruthy();
   });
 
-  it('refuses files over 10 MB before uploading, and shows why the API refused one', async () => {
+  it('refuses files over 4 MB before uploading, and shows why the API refused one', async () => {
     const user = userEvent.setup();
     renderPanel();
     await screen.findByText('dinner.jpg');
 
-    const huge = new File([new Uint8Array(10 * 1024 * 1024 + 1)], 'scan.pdf', {
+    const huge = new File([new Uint8Array(4 * 1024 * 1024 + 1)], 'scan.pdf', {
       type: 'application/pdf',
     });
     await user.upload(screen.getByLabelText('Receipt file'), huge);
     expect(
-      await screen.findByText(/scan\.pdf is 10\.0 MB\. Receipts can be at most 10 MB\./),
+      await screen.findByText(/scan\.pdf is 4\.0 MB\. Receipts can be at most 4 MB\./),
     ).toBeTruthy();
     expect(services.uploadReceipt).not.toHaveBeenCalled();
 

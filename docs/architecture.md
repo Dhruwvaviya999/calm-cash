@@ -556,7 +556,7 @@ and reconciliation are in [database-design.md §3e](./database-design.md#3e-stat
 | `POST /imports/:id/import`                                      | Record ≤ 200 rows; idempotent; partial success reported per row             |
 | `GET …/reconciliation` · `POST …/reconciliation/adjustment`     | Balances at the statement's dates; the approved correction                  |
 | `POST /imports/:id/complete` · `…/cancel`                       | Finish (raw cells discarded) or abandon (imported transactions stay)        |
-| `GET`/`POST /transactions/:id/receipts`                         | Receipt metadata; upload one receipt (raw body ≤ 10 MB, `?fileName=`)       |
+| `GET`/`POST /transactions/:id/receipts`                         | Receipt metadata; upload one receipt (raw body ≤ 4 MB, `?fileName=`)        |
 | `GET …/receipts/:receiptId/file` · `DELETE …/:receiptId`        | Stream the file (owner only); remove it                                     |
 
 - **Imports** (`modules/imports`): `csv-parser.ts` (bounded RFC 4180 reader; refuses binary,
@@ -576,13 +576,14 @@ and reconciliation are in [database-design.md §3e](./database-design.md#3e-stat
   through `lib/file-storage.ts` (`FileStorage`: `put`, `read`, `remove`), whose local adapter keeps
   files under `RECEIPT_STORAGE_DIR` with random 32-hex keys, sharded by prefix, created
   exclusively (never overwritten) with owner-only permissions where the platform supports them,
-  and refuses any key that is not 32 hex characters. Tests use an
+  and refuses any key that is not 32 hex characters. On Vercel, `RECEIPT_STORAGE_PROVIDER=vercel-blob`
+  selects private Vercel Blob storage with the same key validation and ownership checks. Tests use an
   in-memory adapter. Files are served with `nosniff`, `Content-Security-Policy: default-src 'none';
 img-src 'self'; sandbox`, `private, no-store`, and a sanitised `Content-Disposition`; PDFs are
   always attachments.
 - **Limitations (documented, not hidden).** CSV only (no OFX/QFX, PDF, or bank connection); no
   malware scanning of receipts; the local storage adapter needs a persistent, private, backed-up
-  volume (object storage is a later adapter); upload rate limits are per process; statements are
+  volume, while Vercel uses the private Blob adapter; upload rate limits are per process; statements are
   never sent to any external service, AI or otherwise.
 
 ## 18. Notifications and automation (Phase 9)

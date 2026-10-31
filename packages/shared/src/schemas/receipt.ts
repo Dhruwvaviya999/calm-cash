@@ -1,10 +1,6 @@
 import { z } from 'zod';
 
-import {
-  MAX_RECEIPT_BYTES,
-  MAX_RECEIPT_FILE_NAME_LENGTH,
-  RECEIPT_CONTENT_TYPES,
-} from '../constants/imports';
+import { MAX_RECEIPT_FILE_NAME_LENGTH, RECEIPT_CONTENT_TYPES } from '../constants/imports';
 import type { ReceiptDto, ReceiptListDto, ReceiptUploadQuery } from '../types/receipt';
 import { entityIdSchema, isoDateTimeSchema } from './common';
 import { safeFileNameSchema } from './import';
@@ -20,7 +16,12 @@ export const receiptDtoSchema = z.object({
   transactionId: entityIdSchema,
   fileName: z.string().min(1).max(MAX_RECEIPT_FILE_NAME_LENGTH),
   contentType: receiptContentTypeSchema,
-  sizeBytes: z.number().int().positive().max(MAX_RECEIPT_BYTES),
+  // Existing receipt metadata remains readable when the upload limit is lowered.
+  sizeBytes: z
+    .number()
+    .int()
+    .positive()
+    .max(10 * 1024 * 1024),
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
   createdAt: isoDateTimeSchema,
 }) satisfies z.ZodType<ReceiptDto>;
