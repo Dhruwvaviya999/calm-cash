@@ -77,7 +77,7 @@ All commands run from the repository root.
 | `pnpm dev:worker`       | Runs only the background worker (watch mode).                                     |
 | `pnpm worker:start`     | Runs the built worker (`apps/worker/dist/main.js`).                               |
 | `pnpm worker:status`    | Prints job and e-mail queue counts and recently seen workers.                     |
-| `pnpm build`            | Production builds: `apps/api/dist/server.mjs` (tsup) and `apps/web/.next` (Next). |
+| `pnpm build`            | Production builds: `apps/api/dist/server.js` (tsup) and `apps/web/.next` (Next).  |
 | `pnpm lint`             | ESLint across the workspace; warnings fail the run.                               |
 | `pnpm typecheck`        | `tsc` for root tooling, the shared package, the API, and the web app.             |
 | `pnpm test`             | Vitest suites of all packages (no database needed).                               |
@@ -98,7 +98,7 @@ Run the production builds locally:
 
 ```bash
 pnpm build
-pnpm --filter @calmcash/api start        # node dist/server.mjs (reads the root .env)
+pnpm --filter @calmcash/api start        # node dist/server.js (reads the root .env)
 pnpm --filter @calmcash/web start        # next start on :3000
 pnpm --filter @calmcash/worker start     # node dist/main.js (reads the root .env)
 ```

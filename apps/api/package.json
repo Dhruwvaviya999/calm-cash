@@ -13,7 +13,7 @@
   "scripts": {
     "dev": "node --watch --env-file-if-exists=../../.env --import tsx src/server.ts",
     "build": "tsup",
-    "start": "node --env-file-if-exists=../../.env --enable-source-maps dist/server.mjs",
+    "start": "node --env-file-if-exists=../../.env --enable-source-maps dist/server.js",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
