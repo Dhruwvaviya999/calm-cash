@@ -12,6 +12,9 @@ import { createPrismaDashboardRepository } from '../modules/dashboard/dashboard.
 import { createPrismaGoalsRepository } from '../modules/goals/goals.repository';
 import { createPrismaImportsRepository } from '../modules/imports/imports.repository';
 import { createPrismaNotificationsRepository } from '../modules/notifications';
+import { createPrismaAiRepository } from '../modules/ai/ai.repository';
+import { createPrismaInsightsRepository } from '../modules/insights/insights.repository';
+import { createFakeAiProvider } from './fake-ai-provider';
 import { createPrismaReceiptsRepository } from '../modules/receipts/receipts.repository';
 import { createInMemoryFileStorage } from './in-memory-storage';
 import { createPrismaRecurringRepository } from '../modules/recurring';
@@ -85,6 +88,12 @@ export function createTestApp(overrides: Partial<AppDependencies> = {}): Express
       storage: createInMemoryFileStorage(),
     },
     notifications: { repository: createPrismaNotificationsRepository(offline) },
+    ai: {
+      repository: createPrismaAiRepository(offline),
+      provider: createFakeAiProvider(),
+      config: { enabled: true, rateLimit: { limit: 10_000, windowMs: 60_000 } },
+    },
+    insights: { repository: createPrismaInsightsRepository(offline) },
     ...overrides,
   });
 }

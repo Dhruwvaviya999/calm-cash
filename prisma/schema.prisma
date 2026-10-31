@@ -196,6 +196,14 @@ enum AutomationJobStatus {
   @@map("automation_job_status")
 }
 
+/// Who wrote an assistant message.
+enum AiMessageRole {
+  user
+  assistant
+
+  @@map("ai_message_role")
+}
+
 /// What a single-use e-mail token proves when it is consumed.
 enum AuthTokenPurpose {
   email_verification
@@ -238,6 +246,11 @@ model User {
   notifications        Notification[]
   notificationEmails   NotificationDelivery[]
   automationJobs       AutomationJob[]
+  aiPreference         AiPreference?
+  aiConversations      AiConversation[]
+  aiMessages           AiMessage[]
+  aiMerchantRules      AiMerchantRule[]
+  aiDismissals         AiDismissal[]
 
   @@map("users")
 }
@@ -804,4 +817,86 @@ model WorkerHeartbeat {
 
   @@index([lastSeenAt])
   @@map("worker_heartbeats")
+}
+
+/// A person's AI switch. No row means AI features are on (they run on the local model only).
+model AiPreference {
+  userId    String   @id @map("user_id") @db.Uuid
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("ai_preferences")
+}
+
+/// An assistant conversation. History is for reading back only — answers always re-fetch data.
+model AiConversation {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  title     String   @db.VarChar(80)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user     User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages AiMessage[]
+
+  @@index([userId, updatedAt(sort: Desc)])
+  @@map("ai_conversations")
+}
+
+/// One visible message. Assistant messages keep the blocks shown (figures as of `created_at`),
+/// never prompts, hidden reasoning, or raw model output.
+model AiMessage {
+  id             String        @id @default(uuid(7)) @db.Uuid
+  conversationId String        @map("conversation_id") @db.Uuid
+  userId         String        @map("user_id") @db.Uuid
+  role           AiMessageRole
+  content        String        @db.VarChar(4000)
+  /// Validated answer blocks and follow-up questions (Zod on every read).
+  blocks         Json          @default("[]")
+  followUps      String[]      @default([]) @map("follow_ups") @db.VarChar(160)
+  outcome        String?       @db.VarChar(20)
+  narrative      String?       @db.VarChar(10)
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  conversation AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@index([userId])
+  @@map("ai_messages")
+}
+
+/// A merchant name the person confirmed for a description pattern, reused for their later
+/// transactions only (never shared across users).
+model AiMerchantRule {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  patternKey String   @map("pattern_key") @db.VarChar(120)
+  merchant   String   @db.VarChar(120)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, patternKey])
+  @@map("ai_merchant_rules")
+}
+
+/// Something the person rejected or dismissed (a category for a transaction, a merchant
+/// suggestion, a recurring candidate, an insight), so it is not offered again unchanged.
+model AiDismissal {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  kind       String   @db.VarChar(30)
+  subjectKey String   @map("subject_key") @db.VarChar(200)
+  value      String   @default("") @db.VarChar(200)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, kind, subjectKey, value])
+  @@map("ai_dismissals")
 }

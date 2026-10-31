@@ -21,6 +21,7 @@ import {
   type PaymentMethod,
   type ReconciliationPreviewInput,
   type TransactionAccountRefDto,
+  type TransactionDraftDto,
   type TransactionDto,
   type TransactionType,
   type UpdateTransactionInput,
@@ -134,6 +135,32 @@ export function transactionToFormValues(
     case 'balance_adjustment':
       return { ...values, adjustmentDirection: transaction.adjustmentDirection };
   }
+}
+
+/**
+ * Form values for a draft the assistant read from the person's words. Every field stays editable
+ * and is checked again on save; nothing in a draft is recorded until the person saves the form.
+ * Without a time in the text, the current time is used (on the draft's date).
+ */
+export function draftToFormValues(
+  draft: TransactionDraftDto,
+  timeZone: string,
+  now: Date,
+): TransactionFormValues {
+  const empty = emptyTransactionFormValues(draft.type, timeZone, now, draft.accountId ?? '');
+  return {
+    ...empty,
+    transferAccountId: draft.transferAccountId ?? '',
+    amount: draft.amount ?? '',
+    date: draft.date ?? empty.date,
+    time: draft.time ?? empty.time,
+    description: draft.description ?? '',
+    merchant: draft.type === 'transfer' ? '' : (draft.merchant ?? ''),
+    categoryId: draft.type === 'transfer' ? '' : (draft.categoryId ?? ''),
+    paymentMethod: draft.paymentMethod ?? '',
+    notes: draft.notes ?? '',
+    tags: normalizeTags(draft.tags).join(','),
+  };
 }
 
 /** API and schema paths (`body.amountMinor`, `occurredAt`) mapped onto form fields. */

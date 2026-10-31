@@ -25,6 +25,16 @@ import {
   type AuthModuleDependencies,
 } from '../modules/auth/auth.routes';
 import { createGoalsRouter, type GoalsModuleDependencies } from '../modules/goals/goals.routes';
+import { createGoalsService } from '../modules/goals/goals.service';
+import { createAiRouter } from '../modules/ai/ai.routes';
+import type { AiModuleDependencies, InsightsModuleDependencies } from '../modules/ai/ai.module';
+import { createAiService } from '../modules/ai/ai.service';
+import { createBudgetsService } from '../modules/budgets/budgets.service';
+import { createCategoriesService } from '../modules/categories/categories.service';
+import { createDashboardService } from '../modules/dashboard/dashboard.service';
+import { createInsightsRouter } from '../modules/insights/insights.routes';
+import { createInsightsService } from '../modules/insights/insights.service';
+import { createSubscriptionsService } from '../modules/subscriptions/subscriptions.service';
 import { createHealthRouter } from '../modules/health/health.routes';
 import {
   createNotificationsRouter,
@@ -67,6 +77,8 @@ export interface V1RouterDependencies {
   imports: ImportsModuleDependencies;
   receipts: ReceiptsModuleDependencies;
   notifications: NotificationsModuleDependencies;
+  ai: AiModuleDependencies;
+  insights: InsightsModuleDependencies;
 }
 
 /**
@@ -130,6 +142,53 @@ export function createV1Router(dependencies: V1RouterDependencies): Router {
   // Notifications (Phase 9): the center and preferences. Notifications themselves are created by
   // the background worker (apps/worker) from events and schedules, never by a request.
   router.use('/notifications', createNotificationsRouter(dependencies.notifications, boundary));
+
+  // AI and insights (Phase 10). Read-only views over the same services the pages use: deterministic
+  // insights work without AI; the assistant plans with a local model but every figure comes from
+  // these services, and nothing here writes money (drafts and suggestions are applied through the
+  // ordinary endpoints by the person).
+  const aiNow = dependencies.ai.now ?? ((): Date => new Date());
+  const dashboard = createDashboardService({
+    repository: dependencies.dashboard.repository,
+    accountSummary: accounts.summary,
+    now: aiNow,
+  });
+  const insights = createInsightsService({
+    repository: dependencies.insights.repository,
+    dashboard,
+    now: aiNow,
+  });
+  router.use('/insights', createInsightsRouter(insights, boundary));
+  const toolServices = {
+    dashboard,
+    accounts,
+    transactions,
+    budgets: createBudgetsService({ repository: dependencies.budgets.repository, now: aiNow }),
+    recurring,
+    subscriptions: createSubscriptionsService(recurring),
+    goals: createGoalsService({ repository: dependencies.goals.repository, now: aiNow }),
+    insights,
+  };
+  router.use(
+    '/ai',
+    createAiRouter(
+      createAiService({
+        repository: dependencies.ai.repository,
+        provider: dependencies.ai.provider,
+        serverEnabled: dependencies.ai.config.enabled,
+        tools: toolServices,
+        categories: createCategoriesService({
+          repository: dependencies.categories.repository,
+          now: aiNow,
+        }),
+        accounts,
+        transactions,
+        now: aiNow,
+      }),
+      boundary,
+      dependencies.ai.config.rateLimit,
+    ),
+  );
 
   return router;
 }

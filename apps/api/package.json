@@ -14,7 +14,8 @@
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:integration": "vitest run --config vitest.integration.config.ts"
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:ai-smoke": "vitest run --config vitest.ai-smoke.config.ts"
   },
   "dependencies": {
     "@calmcash/shared": "workspace:*",

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { aiEnvFields, checkAiEnv, toAiConfig, type AiConfig } from './ai-env';
 import {
   checkEmailEnv,
   emailEnvFields,
@@ -8,6 +9,7 @@ import {
   type EmailConfig,
 } from './email-env';
 
+export type { AiConfig } from './ai-env';
 export type { EmailConfig, EmailDeliveryMode, SmtpConfig } from './email-env';
 
 export const NODE_ENVIRONMENTS = ['development', 'test', 'production'] as const;
@@ -45,6 +47,8 @@ export interface AppConfig {
   email: EmailConfig;
   /** Private directory for receipt files (relative paths resolve against the working directory). */
   receiptStorageDir: string;
+  /** Local AI (Ollama) settings. */
+  ai: AiConfig;
 }
 
 const DEVELOPMENT_SESSION_COOKIE = 'calmcash_session';
@@ -101,6 +105,7 @@ const envSchema = z
       .max(90 * 24)
       .default(72),
     ...emailEnvFields,
+    ...aiEnvFields,
     RECEIPT_STORAGE_DIR: optionalString,
   })
   .superRefine((env, context) => {
@@ -122,6 +127,7 @@ const envSchema = z
       });
     }
     checkEmailEnv(env, context);
+    checkAiEnv(env, context);
 
     if (production) {
       // Secure cookies only reach the API over HTTPS, and e-mailed links must be HTTPS too.
@@ -193,6 +199,7 @@ export function parseEnv(source: Readonly<Record<string, string | undefined>>): 
       },
       email: toEmailConfig(env),
       receiptStorageDir: env.RECEIPT_STORAGE_DIR ?? DEFAULT_RECEIPT_STORAGE_DIR,
+      ai: toAiConfig(env),
     },
   };
 }
