@@ -101,13 +101,13 @@ that the schema's inferred type _equals_ the interface. Drift between the two fa
 **Build strategy — internal TypeScript package.** The package's `exports` point at its TypeScript
 source (`src/index.ts`); there is no separate build step and no `dist/` that can go stale.
 
-| Consumer          | How `@calmcash/shared` is compiled                                              |
-| ----------------- | ------------------------------------------------------------------------------- |
-| Web (dev & build) | Turbopack transpiles workspace packages automatically.                          |
-| API (dev)         | `node --watch --import tsx` loads the TypeScript source and restarts on edits.  |
-| API (build)       | `tsup` bundles it into `dist/server.js` (`noExternal`); npm deps stay external. |
-| Type-checking     | Each consumer's `tsc` checks the source under its own strict configuration.     |
-| Tests             | Vitest transforms it like any other source file.                                |
+| Consumer          | How `@calmcash/shared` is compiled                                               |
+| ----------------- | -------------------------------------------------------------------------------- |
+| Web (dev & build) | Turbopack transpiles workspace packages automatically.                           |
+| API (dev)         | `node --watch --import tsx` loads the TypeScript source and restarts on edits.   |
+| API (build)       | `tsup` bundles it into `dist/server.mjs` (`noExternal`); npm deps stay external. |
+| Type-checking     | Each consumer's `tsc` checks the source under its own strict configuration.      |
+| Tests             | Vitest transforms it like any other source file.                                 |
 
 Always import from the package root (`import { … } from '@calmcash/shared'`); deep imports into
 `src/` are not part of the contract.
