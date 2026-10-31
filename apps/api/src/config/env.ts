@@ -1,5 +1,15 @@
 import { z } from 'zod';
 
+import {
+  checkEmailEnv,
+  emailEnvFields,
+  optionalString,
+  toEmailConfig,
+  type EmailConfig,
+} from './email-env';
+
+export type { EmailConfig, EmailDeliveryMode, SmtpConfig } from './email-env';
+
 export const NODE_ENVIRONMENTS = ['development', 'test', 'production'] as const;
 export type NodeEnvironment = (typeof NODE_ENVIRONMENTS)[number];
 
@@ -15,22 +25,6 @@ export interface SessionConfig {
   maxAgeMs: number;
   /** A session unused for this long is no longer accepted. */
   idleTimeoutMs: number;
-}
-
-export interface SmtpConfig {
-  host: string;
-  port: number;
-  /** Implicit TLS (usually port 465). When false, STARTTLS is used if the server offers it. */
-  secure: boolean;
-  /** Refuse to send without TLS (STARTTLS). Always true in production unless `secure`. */
-  requireTls: boolean;
-  auth: { user: string; password: string } | undefined;
-}
-
-export interface EmailConfig {
-  /** RFC 5322 sender, e.g. `CalmCash <no-reply@calmcash.example>`. */
-  from: string;
-  smtp: SmtpConfig;
 }
 
 /** Validated, typed runtime configuration of the API. Never read `process.env` elsewhere. */
@@ -63,40 +57,34 @@ const DEFAULT_RECEIPT_STORAGE_DIR = '.data/receipts';
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 
-const originSchema = z
+export const originSchema = z
   .url({ protocol: /^https?$/ })
   .refine((value) => new URL(value).origin === value, {
     message: 'Must be a bare origin such as "https://app.example.com" (no path or trailing slash).',
   });
 
-const booleanFlagSchema = z
-  .enum(['true', 'false'], { error: 'Must be "true" or "false".' })
-  .transform((value) => value === 'true');
+export const databaseUrlSchema = z.url({
+  protocol: /^postgres(?:ql)?$/,
+  error: 'Must be a PostgreSQL connection URL (postgresql://user:password@host:port/database).',
+});
 
-/** Empty strings count as "not set", so `SMTP_USER=` in a .env file behaves like an absent value. */
-const optionalString = z
+export const corsOriginsSchema = z
   .string()
-  .optional()
-  .transform((value) => (value === undefined || value.trim() === '' ? undefined : value));
+  .transform((value) =>
+    value
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter((origin) => origin.length > 0),
+  )
+  .pipe(z.array(originSchema).min(1, 'At least one origin is required.'));
 
 const envSchema = z
   .object({
     NODE_ENV: z.enum(NODE_ENVIRONMENTS).default('development'),
     API_HOST: z.string().min(1).default('localhost'),
     API_PORT: z.coerce.number().int().min(1).max(65_535).default(4000),
-    DATABASE_URL: z.url({
-      protocol: /^postgres(?:ql)?$/,
-      error: 'Must be a PostgreSQL connection URL (postgresql://user:password@host:port/database).',
-    }),
-    CORS_ORIGINS: z
-      .string()
-      .transform((value) =>
-        value
-          .split(',')
-          .map((origin) => origin.trim())
-          .filter((origin) => origin.length > 0),
-      )
-      .pipe(z.array(originSchema).min(1, 'At least one origin is required.')),
+    DATABASE_URL: databaseUrlSchema,
+    CORS_ORIGINS: corsOriginsSchema,
     WEB_APP_URL: optionalString.pipe(originSchema.optional()),
     TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(0),
     JSON_BODY_LIMIT: z
@@ -112,12 +100,7 @@ const envSchema = z
       .min(1)
       .max(90 * 24)
       .default(72),
-    SMTP_HOST: optionalString,
-    SMTP_PORT: z.coerce.number().int().min(1).max(65_535).default(1025),
-    SMTP_SECURE: booleanFlagSchema.default(false),
-    SMTP_USER: optionalString,
-    SMTP_PASSWORD: optionalString,
-    EMAIL_FROM: optionalString,
+    ...emailEnvFields,
     RECEIPT_STORAGE_DIR: optionalString,
   })
   .superRefine((env, context) => {
@@ -138,13 +121,7 @@ const envSchema = z
         message: 'Must not exceed SESSION_MAX_AGE_DAYS.',
       });
     }
-    if ((env.SMTP_USER === undefined) !== (env.SMTP_PASSWORD === undefined)) {
-      context.addIssue({
-        code: 'custom',
-        path: [env.SMTP_USER === undefined ? 'SMTP_USER' : 'SMTP_PASSWORD'],
-        message: 'Set both SMTP_USER and SMTP_PASSWORD, or neither.',
-      });
-    }
+    checkEmailEnv(env, context);
 
     if (production) {
       // Secure cookies only reach the API over HTTPS, and e-mailed links must be HTTPS too.
@@ -166,18 +143,16 @@ const envSchema = z
           message: 'Required in production (a private directory on a persistent volume).',
         });
       }
-      // Development defaults point at the local Mailpit catcher; production must say where mail goes.
-      for (const name of ['SMTP_HOST', 'EMAIL_FROM'] as const) {
-        if (env[name] === undefined) {
-          context.addIssue({
-            code: 'custom',
-            path: [name],
-            message: 'Required in production (verification and password-reset e-mails need it).',
-          });
-        }
-      }
     }
   });
+
+/** `VARIABLE: rule` lines for a failed environment parse; values are never included. */
+export function describeEnvIssues(error: z.ZodError): string[] {
+  return error.issues.map((issue) => {
+    const variable = issue.path.map(String).join('.') || '(environment)';
+    return `${variable}: ${issue.message}`;
+  });
+}
 
 export type EnvParseResult =
   { success: true; config: AppConfig } | { success: false; issues: readonly string[] };
@@ -190,13 +165,7 @@ export function parseEnv(source: Readonly<Record<string, string | undefined>>): 
   const result = envSchema.safeParse(source);
 
   if (!result.success) {
-    return {
-      success: false,
-      issues: result.error.issues.map((issue) => {
-        const variable = issue.path.map(String).join('.') || '(environment)';
-        return `${variable}: ${issue.message}`;
-      }),
-    };
+    return { success: false, issues: describeEnvIssues(result.error) };
   }
 
   const env = result.data;
@@ -222,19 +191,7 @@ export function parseEnv(source: Readonly<Record<string, string | undefined>>): 
         maxAgeMs: env.SESSION_MAX_AGE_DAYS * DAY_MS,
         idleTimeoutMs: env.SESSION_IDLE_TIMEOUT_HOURS * HOUR_MS,
       },
-      email: {
-        from: env.EMAIL_FROM ?? 'CalmCash <no-reply@calmcash.localhost>',
-        smtp: {
-          host: env.SMTP_HOST ?? 'localhost',
-          port: env.SMTP_PORT,
-          secure: env.SMTP_SECURE,
-          requireTls: production && !env.SMTP_SECURE,
-          auth:
-            env.SMTP_USER === undefined || env.SMTP_PASSWORD === undefined
-              ? undefined
-              : { user: env.SMTP_USER, password: env.SMTP_PASSWORD },
-        },
-      },
+      email: toEmailConfig(env),
       receiptStorageDir: env.RECEIPT_STORAGE_DIR ?? DEFAULT_RECEIPT_STORAGE_DIR,
     },
   };

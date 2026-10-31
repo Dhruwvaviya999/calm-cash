@@ -16,6 +16,7 @@ import {
   type PrismaClient,
   type Transaction,
 } from '../../generated/prisma/client';
+import { recordBudgetsChanged } from '../../lib/automation-events';
 import {
   lockAccounts,
   queryMovementTotals,
@@ -27,7 +28,9 @@ import { transactionOrderBy, transactionWhere } from './transaction-query';
 
 // Database access for transactions. Every query is scoped by the owner's user ID. Writes run in a
 // `Ledger`: one database transaction that locks what it changes (transaction rows first, then
-// accounts in ID order), so concurrent writes queue instead of interleaving.
+// accounts in ID order), so concurrent writes queue instead of interleaving. A ledger that changed
+// spending also records a budget re-check for the worker in the same transaction, so no committed
+// change can miss its budget alerts (see lib/automation-events.ts).
 
 export type TransactionRecord = Transaction;
 
@@ -149,7 +152,13 @@ function isUniqueViolation(error: unknown): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
 }
 
-function createLedger(tx: Prisma.TransactionClient): Ledger {
+/** What a ledger changed that budgets may depend on: new rows' owners and edited row IDs. */
+interface LedgerChanges {
+  owners: Set<string>;
+  transactionIds: Set<string>;
+}
+
+function createLedger(tx: Prisma.TransactionClient, changes: LedgerChanges): Ledger {
   return {
     client: tx,
 
@@ -195,9 +204,11 @@ function createLedger(tx: Prisma.TransactionClient): Ledger {
 
     insert: async (userId, write, idempotencyKey, createdAt) => {
       try {
-        return await tx.transaction.create({
+        const created = await tx.transaction.create({
           data: { ...write, userId, idempotencyKey, createdAt },
         });
+        changes.owners.add(userId);
+        return created;
       } catch (error: unknown) {
         if (idempotencyKey !== null && isUniqueViolation(error)) {
           throw new IdempotencyKeyTakenError('Idempotency key already used.', { cause: error });
@@ -208,9 +219,11 @@ function createLedger(tx: Prisma.TransactionClient): Ledger {
 
     update: async (transactionId, write) => {
       await tx.transaction.update({ where: { id: transactionId }, data: write });
+      changes.transactionIds.add(transactionId);
     },
 
     setVoided: async (transactionIds, voided) => {
+      for (const id of transactionIds) changes.transactionIds.add(id);
       const { count } = await tx.transaction.updateMany({
         where: {
           id: { in: [...transactionIds] },
@@ -225,6 +238,7 @@ function createLedger(tx: Prisma.TransactionClient): Ledger {
     },
 
     setCategory: async (transactionIds, categoryId) => {
+      for (const id of transactionIds) changes.transactionIds.add(id);
       const { count } = await tx.transaction.updateMany({
         where: { id: { in: [...transactionIds] } },
         data: { categoryId },
@@ -238,11 +252,45 @@ function createLedger(tx: Prisma.TransactionClient): Ledger {
   };
 }
 
-export function createPrismaTransactionsRepository(prisma: PrismaClient): TransactionsRepository {
+export interface TransactionsRepositoryOptions {
+  /** Clock for the recorded budget re-check events (injectable for tests). */
+  now?: () => Date;
+}
+
+/** Owners of every changed row; each gets one budget re-check event. */
+async function changedOwners(
+  tx: Prisma.TransactionClient,
+  changes: LedgerChanges,
+): Promise<Set<string>> {
+  const owners = new Set(changes.owners);
+  if (changes.transactionIds.size > 0) {
+    const rows = await tx.transaction.findMany({
+      where: { id: { in: [...changes.transactionIds] } },
+      select: { userId: true },
+      distinct: ['userId'],
+    });
+    for (const row of rows) owners.add(row.userId);
+  }
+  return owners;
+}
+
+export function createPrismaTransactionsRepository(
+  prisma: PrismaClient,
+  { now = (): Date => new Date() }: TransactionsRepositoryOptions = {},
+): TransactionsRepository {
   return {
     // Writes wait for each other's row locks, so allow time to queue for a connection and a lock.
     inLedger: (work) =>
-      prisma.$transaction((tx) => work(createLedger(tx)), { maxWait: 10_000, timeout: 20_000 }),
+      prisma.$transaction(
+        async (tx) => {
+          const changes: LedgerChanges = { owners: new Set(), transactionIds: new Set() };
+          const result = await work(createLedger(tx, changes));
+          // Last statement before commit: the event commits with the change or not at all.
+          await recordBudgetsChanged(tx, await changedOwners(tx, changes), now());
+          return result;
+        },
+        { maxWait: 10_000, timeout: 20_000 },
+      ),
 
     findWithRefs: (userId, transactionId) =>
       prisma.transaction.findFirst({

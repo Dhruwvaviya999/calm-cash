@@ -4,6 +4,7 @@ import {
 } from '@calmcash/shared';
 
 import type { EmailMessage } from '../../lib/email';
+import { escapeHtml } from '../../lib/html';
 
 // Transactional e-mails of the authentication flow, as plain text plus a minimal, accessible HTML
 // version. Every interpolated value is escaped. Links carry one-time tokens, so these messages are
@@ -14,15 +15,6 @@ interface Paragraphs {
   lines: readonly string[];
   action?: { label: string; url: string };
   footer: string;
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
 }
 
 function render(to: string, template: string, subject: string, content: Paragraphs): EmailMessage {

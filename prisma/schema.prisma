@@ -151,6 +151,51 @@ enum OccurrenceState {
   @@map("occurrence_state")
 }
 
+/// Kinds of notification (packages/shared/src/constants/notifications.ts holds the meaning).
+enum NotificationType {
+  budget_approaching_limit
+  budget_limit_reached
+  recurring_payment_upcoming
+  recurring_payment_due
+  recurring_payment_overdue
+  subscription_renewal_upcoming
+  monthly_summary_ready
+  email_delivery_problem
+
+  @@map("notification_type")
+}
+
+/// Channels with delivery records; in-app notifications need none.
+enum DeliveryChannel {
+  email
+
+  @@map("delivery_channel")
+}
+
+/// Where one e-mail delivery stands (independent of the in-app read state).
+enum NotificationDeliveryStatus {
+  pending
+  processing
+  sent
+  retry_scheduled
+  failed
+  suppressed
+
+  @@map("notification_delivery_status")
+}
+
+/// Where one automation job stands.
+enum AutomationJobStatus {
+  pending
+  processing
+  succeeded
+  failed
+  cancelled
+  expired
+
+  @@map("automation_job_status")
+}
+
 /// What a single-use e-mail token proves when it is consumed.
 enum AuthTokenPurpose {
   email_verification
@@ -189,6 +234,10 @@ model User {
   statementImports     StatementImport[]
   statementImportRows  StatementImportRow[]
   transactionReceipts  TransactionReceipt[]
+  notificationSettings NotificationPreference?
+  notifications        Notification[]
+  notificationEmails   NotificationDelivery[]
+  automationJobs       AutomationJob[]
 
   @@map("users")
 }
@@ -615,4 +664,144 @@ model TransactionReceipt {
 
   @@index([transactionId])
   @@map("transaction_receipts")
+}
+
+/// A person's notification choices. No row means the documented defaults (in-app on, e-mail off,
+/// three days' notice); the row is created on the first change.
+model NotificationPreference {
+  userId                    String   @id @map("user_id") @db.Uuid
+  budgetAlertsInApp         Boolean  @default(true) @map("budget_alerts_in_app")
+  budgetAlertsEmail         Boolean  @default(false) @map("budget_alerts_email")
+  upcomingPaymentsInApp     Boolean  @default(true) @map("upcoming_payments_in_app")
+  upcomingPaymentsEmail     Boolean  @default(false) @map("upcoming_payments_email")
+  overduePaymentsInApp      Boolean  @default(true) @map("overdue_payments_in_app")
+  overduePaymentsEmail      Boolean  @default(false) @map("overdue_payments_email")
+  subscriptionRenewalsInApp Boolean  @default(true) @map("subscription_renewals_in_app")
+  subscriptionRenewalsEmail Boolean  @default(false) @map("subscription_renewals_email")
+  monthlySummaryInApp       Boolean  @default(true) @map("monthly_summary_in_app")
+  monthlySummaryEmail       Boolean  @default(false) @map("monthly_summary_email")
+  /// Days of notice before a bill or expected income is due: 1, 3, or 7 (CHECK constraint).
+  paymentLeadDays           Int      @default(3) @map("payment_lead_days") @db.SmallInt
+  /// Days of notice before a subscription renews: 1, 3, or 7 (CHECK constraint).
+  subscriptionLeadDays      Int      @default(3) @map("subscription_lead_days") @db.SmallInt
+  /// Also remind about expected income, not only bills.
+  includeRecurringIncome    Boolean  @default(false) @map("include_recurring_income")
+  createdAt                 DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                 DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
+}
+
+/// One logical notification. Its identity is the user plus `dedupe_key` (for example a budget,
+/// its period, its limit, and the threshold), so repeating the job that creates it never creates
+/// it twice. Title and body are plain text written by the API; `target` holds identifiers only.
+model Notification {
+  id          String           @id @default(uuid(7)) @db.Uuid
+  userId      String           @map("user_id") @db.Uuid
+  type        NotificationType
+  dedupeKey   String           @map("dedupe_key") @db.VarChar(200)
+  title       String           @db.VarChar(160)
+  body        String           @db.VarChar(1000)
+  /// Navigation target (validated with Zod on every read); never a URL.
+  target      Json?
+  /// Shown in the notification center: the person's in-app choice when it was created. False
+  /// when it exists only to be e-mailed.
+  inApp       Boolean          @map("in_app")
+  readAt      DateTime?        @map("read_at") @db.Timestamptz(3)
+  dismissedAt DateTime?        @map("dismissed_at") @db.Timestamptz(3)
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user       User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries NotificationDelivery[]
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([userId, readAt])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+/// One attempt-tracked delivery of a notification outside the app (e-mail). Claimed by workers
+/// with `FOR UPDATE SKIP LOCKED` and a lease, retried with backoff, never deleted on failure.
+model NotificationDelivery {
+  id               String                     @id @default(uuid(7)) @db.Uuid
+  notificationId   String                     @map("notification_id") @db.Uuid
+  userId           String                     @map("user_id") @db.Uuid
+  channel          DeliveryChannel            @default(email)
+  status           NotificationDeliveryStatus @default(pending)
+  attempts         Int                        @default(0)
+  maxAttempts      Int                        @default(5) @map("max_attempts")
+  nextAttemptAt    DateTime                   @map("next_attempt_at") @db.Timestamptz(3)
+  /// After this instant the message is no longer worth sending (e.g. the payment is already due).
+  expiresAt        DateTime?                  @map("expires_at") @db.Timestamptz(3)
+  /// Worker holding the lease while `processing`.
+  lockedBy         String?                    @map("locked_by") @db.VarChar(100)
+  lockedUntil      DateTime?                  @map("locked_until") @db.Timestamptz(3)
+  /// Sanitised classification of the last failure or suppression (never a provider message).
+  lastErrorCode    String?                    @map("last_error_code") @db.VarChar(40)
+  /// An attempt ended without knowing whether the mail server accepted the message.
+  outcomeUncertain Boolean                    @default(false) @map("outcome_uncertain")
+  sentAt           DateTime?                  @map("sent_at") @db.Timestamptz(3)
+  completedAt      DateTime?                  @map("completed_at") @db.Timestamptz(3)
+  createdAt        DateTime                   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, channel])
+  @@index([status, nextAttemptAt])
+  @@index([userId, status])
+  @@index([completedAt])
+  @@map("notification_deliveries")
+}
+
+/// Durable background work: business events (a budget to re-check) and scheduled reviews. Claimed
+/// with `FOR UPDATE SKIP LOCKED` and a lease; an expired lease is recovered by any worker.
+model AutomationJob {
+  id            String              @id @default(uuid(7)) @db.Uuid
+  /// `budget_evaluation`, `daily_review`, or `maintenance`; read as text and validated with Zod,
+  /// so a kind this deployment does not know fails the job instead of the worker.
+  kind          String              @db.VarChar(40)
+  userId        String?             @map("user_id") @db.Uuid
+  /// "Never twice": a scheduled run (one daily review per user and local day) keeps its key.
+  dedupeKey     String?             @unique @map("dedupe_key") @db.VarChar(200)
+  /// "At most one waiting": set while pending and cleared when claimed, so events that arrive
+  /// while a job waits are absorbed by it, and events during a run queue exactly one more.
+  coalesceKey   String?             @unique @map("coalesce_key") @db.VarChar(200)
+  /// Versioned, identifiers only (validated with Zod when claimed).
+  payload       Json
+  status        AutomationJobStatus @default(pending)
+  runAt         DateTime            @map("run_at") @db.Timestamptz(3)
+  /// Not run after this instant (marked `expired`), so missed work is never replayed blindly.
+  expiresAt     DateTime?           @map("expires_at") @db.Timestamptz(3)
+  attempts      Int                 @default(0)
+  maxAttempts   Int                 @default(5) @map("max_attempts")
+  lockedBy      String?             @map("locked_by") @db.VarChar(100)
+  lockedUntil   DateTime?           @map("locked_until") @db.Timestamptz(3)
+  lastErrorCode String?             @map("last_error_code") @db.VarChar(40)
+  completedAt   DateTime?           @map("completed_at") @db.Timestamptz(3)
+  createdAt     DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, runAt])
+  @@index([userId])
+  @@index([completedAt])
+  @@map("automation_jobs")
+}
+
+/// A running worker process, refreshed while it works. Diagnostics only (Settings shows whether
+/// reminders are being processed); never used for locking.
+model WorkerHeartbeat {
+  id         String   @id @db.VarChar(100)
+  startedAt  DateTime @map("started_at") @db.Timestamptz(3)
+  lastSeenAt DateTime @map("last_seen_at") @db.Timestamptz(3)
+
+  @@index([lastSeenAt])
+  @@map("worker_heartbeats")
 }

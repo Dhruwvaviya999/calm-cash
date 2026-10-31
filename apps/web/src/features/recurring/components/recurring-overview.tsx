@@ -27,6 +27,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useSignedInSession } from '@/features/auth';
 import { useAsyncResource } from '@/hooks/use-async-resource';
+import { useLinkedId } from '@/hooks/use-linked-id';
 import { formatDate, formatMoney } from '@/lib/format';
 import { describeRequestError } from '@/lib/form-errors';
 import {
@@ -166,7 +167,8 @@ export function RecurringOverview(): ReactNode {
   const [archived, setArchived] = useState(false);
   const [notice, setNotice] = useState<PlanningNotice>();
   const [formMode, setFormMode] = useState<ScheduleFormMode | undefined>();
-  const [detailsId, setDetailsId] = useState<string | undefined>();
+  // A reminder links here with `?schedule=`; the sheet loads it (and explains if it is gone).
+  const [detailsId, setDetailsId] = useState<string | undefined>(useLinkedId('schedule'));
   const [detailsTitle, setDetailsTitle] = useState('Schedule');
   const [version, setVersion] = useState(0);
   const [ending, setEnding] = useState<RecurringScheduleItemDto | undefined>();

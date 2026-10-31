@@ -8,10 +8,17 @@ import { HeaderContext } from './header-context';
 
 /**
  * Top application bar. Mobile: compact bar with the CalmCash identity. Tablet/desktop: the
- * current location (breadcrumb). Theme and account controls are always on the right. The account
- * menu is passed in, so this design-system component stays independent of the auth feature.
+ * current location (breadcrumb). Notifications, theme, and account controls are always on the
+ * right. The notification and account controls are passed in, so this design-system component
+ * stays independent of the features behind them.
  */
-export function AppHeader({ accountMenu }: { accountMenu: ReactNode }): ReactNode {
+export function AppHeader({
+  accountMenu,
+  notifications,
+}: {
+  accountMenu: ReactNode;
+  notifications?: ReactNode;
+}): ReactNode {
   return (
     <header className="sticky top-0 z-20 border-b bg-background pt-safe">
       <div className="flex h-(--app-header-height) items-center gap-3 px-gutter">
@@ -22,6 +29,7 @@ export function AppHeader({ accountMenu }: { accountMenu: ReactNode }): ReactNod
           <HeaderContext />
         </div>
         <div className="ml-auto flex items-center gap-1">
+          {notifications}
           <ThemeToggle />
           {accountMenu}
         </div>

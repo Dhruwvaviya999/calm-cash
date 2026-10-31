@@ -292,6 +292,24 @@ describe('PlanningPage › budgets', () => {
     });
   });
 
+  it('opens the budget a notification links to, and explains when it is gone', async () => {
+    transactions.listTransactions.mockResolvedValue({
+      items: [],
+      pagination: { page: 1, pageSize: 8, totalItems: 0, totalPages: 0 },
+    });
+    navigation.search = new URLSearchParams(`budget=${overBudget.budget.id}`);
+    const { unmount } = renderWithAuth(<PlanningPage />);
+    const sheet = await screen.findByRole('dialog');
+    expect(within(sheet).getAllByText('Food').length).toBeGreaterThan(0);
+    unmount();
+
+    // An archived or deleted budget: a calm explanation instead of a broken page.
+    navigation.search = new URLSearchParams('budget=0193a000-0000-7000-8000-00000000dead');
+    renderWithAuth(<PlanningPage />);
+    expect(await screen.findByText('That budget is not in this list')).toBeDefined();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
   it('validates the create form and sends exact minor units', async () => {
     budgets.createBudget.mockResolvedValue(overBudget);
     renderWithAuth(<PlanningPage />);

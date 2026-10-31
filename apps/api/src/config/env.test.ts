@@ -9,6 +9,7 @@ const VALID_ENV = {
 
 const PRODUCTION_ENV = {
   NODE_ENV: 'production',
+  EMAIL_DELIVERY_MODE: 'smtp',
   DATABASE_URL: 'postgresql://calmcash:prod-secret@db.internal:5432/calmcash',
   CORS_ORIGINS: 'https://app.calmcash.example',
   SMTP_HOST: 'smtp.mail.example',
@@ -47,6 +48,7 @@ describe('parseEnv', () => {
           idleTimeoutMs: 72 * 60 * 60 * 1000,
         },
         email: {
+          mode: 'mailpit',
           from: 'CalmCash <no-reply@calmcash.localhost>',
           smtp: {
             host: 'localhost',
@@ -68,6 +70,7 @@ describe('parseEnv', () => {
       API_PORT: '8080',
       CORS_ORIGINS: 'https://app.calmcash.example, https://admin.calmcash.example',
       WEB_APP_URL: 'https://app.calmcash.example',
+      EMAIL_DELIVERY_MODE: 'smtp',
       SMTP_HOST: 'smtp.mail.example',
       EMAIL_FROM: 'CalmCash <no-reply@calmcash.example>',
       RECEIPT_STORAGE_DIR: '/var/lib/calmcash/receipts',
@@ -135,9 +138,20 @@ describe('parseEnv', () => {
 
     const issues = issuesOf(result);
     expect(issues).toContain('CORS_ORIGINS: Production origins must use https.');
-    expect(issues).toContain('SMTP_HOST');
-    expect(issues).toContain('EMAIL_FROM');
+    // Delivery is never guessed: production must say how e-mail is sent.
+    expect(issues).toContain('EMAIL_DELIVERY_MODE');
     expect(issues).toContain('RECEIPT_STORAGE_DIR');
+
+    const smtp = issuesOf(
+      parseEnv({
+        NODE_ENV: 'production',
+        EMAIL_DELIVERY_MODE: 'smtp',
+        DATABASE_URL: PRODUCTION_ENV.DATABASE_URL,
+        CORS_ORIGINS: 'https://app.calmcash.example',
+      }),
+    );
+    expect(smtp).toContain('SMTP_HOST');
+    expect(smtp).toContain('EMAIL_FROM');
   });
 
   it('keeps the web app origin inside the CORS allow-list', () => {

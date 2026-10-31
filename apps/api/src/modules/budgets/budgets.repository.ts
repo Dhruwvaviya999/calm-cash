@@ -3,10 +3,12 @@ import { z } from 'zod';
 
 import type { Prisma } from '../../generated/prisma/client';
 import type { Budget, PrismaClient } from '../../generated/prisma/client';
+import { recordBudgetsChanged } from '../../lib/automation-events';
 
 // Database access for budgets. Every query is scoped by the owner's user ID. Spending is never
 // stored: it is aggregated from the transaction ledger on every read, for all requested budgets
-// in one query.
+// in one query. A budget write records a budget re-check for the worker in the same transaction,
+// so new or changed limits and thresholds are evaluated (lib/automation-events.ts).
 
 export type BudgetRecord = Budget;
 
@@ -146,7 +148,15 @@ function createWriteStore(tx: Prisma.TransactionClient): BudgetWriteStore {
   };
 }
 
-export function createPrismaBudgetsRepository(prisma: PrismaClient): BudgetsRepository {
+export interface BudgetsRepositoryOptions {
+  /** Clock for the recorded budget re-check events (injectable for tests). */
+  now?: () => Date;
+}
+
+export function createPrismaBudgetsRepository(
+  prisma: PrismaClient,
+  { now = (): Date => new Date() }: BudgetsRepositoryOptions = {},
+): BudgetsRepository {
   return {
     list: (userId, { status, period, categoryId, currency }) =>
       prisma.budget.findMany({
@@ -221,7 +231,9 @@ export function createPrismaBudgetsRepository(prisma: PrismaClient): BudgetsRepo
     inBudgetWrite: (userId, work) =>
       prisma.$transaction(async (tx) => {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`budgets:${userId}`}, 0))`;
-        return work(createWriteStore(tx));
+        const result = await work(createWriteStore(tx));
+        await recordBudgetsChanged(tx, [userId], now());
+        return result;
       }),
   };
 }

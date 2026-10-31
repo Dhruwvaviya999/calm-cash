@@ -396,6 +396,37 @@ the `(auth)` pages are public, and `/login` and `/register` send signed-in users
   text containing `<script>` shown as text. The review filters at phone width exposed a shared
   `FilterOptions` bug (hidden radios widened the page when the options scrolled), fixed there.
 
+## 7f. Notifications (Phase 9)
+
+- **Bell.** `AppShell`/`AppHeader` take a `notifications` slot (like `accountMenu`), filled by
+  `NotificationBell` from `(app)/layout.tsx`. `NotificationsProvider` shares the unread count
+  between the bell and the center; it is fetched only when signed in, every minute while the tab is
+  visible, and on returning to the tab. Until the API answers, the bell has no badge and its name is
+  just "Notifications" — never a placeholder number. The badge text is capped at "99+"; the
+  accessible name says "Notifications, 3 unread".
+- **Preview.** md and up: a Radix popover (`components/ui/popover.tsx`) with the five newest
+  notifications, "Mark all as read", and "View all notifications". Phones: the bell is a link to
+  `/notifications` (a full page reads better than a small popover). Loading, error (with retry), and
+  empty states are inside the popover; a failure never affects the rest of the shell.
+- **Center** (`/notifications`, not a navigation item; reached from the bell and e-mails): All /
+  Unread toggle buttons (`aria-pressed`), newest first, "Show older notifications" for the next page,
+  "Mark all as read", and a Preferences link. Each item is an `article` labelled by its title: type
+  label, title (heavier when unread), a "New" pill with "(unread)" for screen readers — never colour
+  alone —, the body as plain text, a relative time in a `<time>` with the full date and time in the
+  user's time zone as its title, and actions: the destination link (marks it read), "Mark as read",
+  and "Dismiss" (accessible names include the title).
+- **Destinations.** Links come from the shared `notificationLocation`: `/budgets?budget=<id>` opens
+  that budget's details (or explains that it is archived or gone), `?section=recurring|subscriptions
+&schedule=<id>` opens the schedule sheet (which shows its own "not found" state), the dashboard
+  opens the summarised month (`period=custom&from&to&currency`), and service notices open Settings →
+  Notifications. `useLinkedId` accepts only well-formed IDs; the API still authorises every load.
+- **Preferences** (Settings → Notifications, anchor `#notifications`): whether the background
+  service is running (or a calm notice that reminders are paused), the e-mail address with its
+  verification badge (e-mail checkboxes disabled while unverified), one fieldset per category with
+  "In the app" and "By e-mail" checkboxes and a sentence on what it covers, the income opt-in, lead
+  times (1, 3, or 7 days) for bills and subscriptions, and Save / Discard with success and error
+  messages.
+
 ## 8. Prototype data rules
 
 - Since Phase 7 no sample data remains: the Budgets preview was the last user of

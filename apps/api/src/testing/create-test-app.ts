@@ -11,6 +11,7 @@ import { createPrismaCategoriesRepository } from '../modules/categories/categori
 import { createPrismaDashboardRepository } from '../modules/dashboard/dashboard.repository';
 import { createPrismaGoalsRepository } from '../modules/goals/goals.repository';
 import { createPrismaImportsRepository } from '../modules/imports/imports.repository';
+import { createPrismaNotificationsRepository } from '../modules/notifications';
 import { createPrismaReceiptsRepository } from '../modules/receipts/receipts.repository';
 import { createInMemoryFileStorage } from './in-memory-storage';
 import { createPrismaRecurringRepository } from '../modules/recurring';
@@ -83,6 +84,7 @@ export function createTestApp(overrides: Partial<AppDependencies> = {}): Express
       repository: createPrismaReceiptsRepository(offline),
       storage: createInMemoryFileStorage(),
     },
+    notifications: { repository: createPrismaNotificationsRepository(offline) },
     ...overrides,
   });
 }

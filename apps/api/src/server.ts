@@ -14,6 +14,7 @@ import { createPrismaCategoriesRepository } from './modules/categories/categorie
 import { createPrismaDashboardRepository } from './modules/dashboard/dashboard.repository';
 import { createPrismaGoalsRepository } from './modules/goals/goals.repository';
 import { createPrismaImportsRepository } from './modules/imports/imports.repository';
+import { createPrismaNotificationsRepository } from './modules/notifications';
 import { createPrismaReceiptsRepository } from './modules/receipts/receipts.repository';
 import { createLocalFileStorage } from './lib/file-storage';
 import { createPrismaRecurringRepository } from './modules/recurring';
@@ -69,6 +70,7 @@ const app = createApp({
     repository: createPrismaReceiptsRepository(prisma),
     storage: createLocalFileStorage(config.receiptStorageDir),
   },
+  notifications: { repository: createPrismaNotificationsRepository(prisma) },
 });
 
 const stopSessionCleanup = scheduleSessionCleanup({

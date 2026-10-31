@@ -27,6 +27,7 @@ import {
   createPrismaImportsRepository,
   type ImportsRepository,
 } from '../modules/imports/imports.repository';
+import { createPrismaNotificationsRepository } from '../modules/notifications';
 import { createPrismaReceiptsRepository } from '../modules/receipts/receipts.repository';
 import type { FileStorage } from '../lib/file-storage';
 import { createInMemoryFileStorage, type InMemoryFileStorage } from './in-memory-storage';
@@ -114,8 +115,9 @@ export function useIntegrationDatabase(): {
   const prisma = createPrismaClient(url, logger);
 
   beforeEach(async () => {
-    // Users cascade to sessions, tokens, and all financial tables.
-    await prisma.$executeRaw`TRUNCATE TABLE "users" CASCADE`;
+    // Users cascade to sessions, tokens, notifications, and all financial tables; jobs without an
+    // owner (maintenance) and worker heartbeats are cleared explicitly.
+    await prisma.$executeRaw`TRUNCATE TABLE "users", "automation_jobs", "worker_heartbeats" CASCADE`;
   });
 
   afterAll(async () => {
@@ -150,14 +152,17 @@ export function useIntegrationDatabase(): {
         },
         transactions: {
           repository: (options.transactionsRepository ?? ((real) => real))(
-            createPrismaTransactionsRepository(prisma),
+            createPrismaTransactionsRepository(prisma, { now: clock.now }),
           ),
           now: clock.now,
         },
         categories: { repository: createPrismaCategoriesRepository(prisma), now: clock.now },
         tags: { repository: createPrismaTagsRepository(prisma) },
         dashboard: { repository: createPrismaDashboardRepository(prisma), now: clock.now },
-        budgets: { repository: createPrismaBudgetsRepository(prisma), now: clock.now },
+        budgets: {
+          repository: createPrismaBudgetsRepository(prisma, { now: clock.now }),
+          now: clock.now,
+        },
         recurring: {
           repository: (options.recurringRepository ?? ((real) => real))(
             createPrismaRecurringRepository(prisma),
@@ -177,6 +182,10 @@ export function useIntegrationDatabase(): {
           storage: (options.receiptStorage ?? ((real) => real))(storage),
           now: clock.now,
           uploadRate: { limit: 10_000, windowMs: 60_000 },
+        },
+        notifications: {
+          repository: createPrismaNotificationsRepository(prisma),
+          now: clock.now,
         },
       });
       return { app, prisma, repository, email, clock, tasks, storage };

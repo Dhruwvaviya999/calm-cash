@@ -10,6 +10,7 @@ import {
   ProfileSettings,
   ResetDisplayPreferences,
 } from '@/features/settings';
+import { NotificationPreferences } from '@/features/notifications';
 import { SystemStatusCard } from '@/features/system-status';
 
 export const metadata: Metadata = { title: 'Settings' };
@@ -19,16 +20,20 @@ function SettingsSection({
   title,
   description,
   children,
+  anchor,
 }: {
   id: string;
   title: string;
   description: string;
   children: ReactNode;
+  /** Fragment that links straight to this section (e.g. from e-mails). */
+  anchor?: string;
 }): ReactNode {
   return (
     <section
+      id={anchor}
       aria-labelledby={id}
-      className="grid gap-4 border-b pb-8 last:border-b-0 last:pb-0 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)] lg:gap-10"
+      className="grid scroll-mt-[calc(var(--app-header-height)+1.5rem)] gap-4 border-b pb-8 last:border-b-0 last:pb-0 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)] lg:gap-10"
     >
       <div className="flex flex-col gap-1">
         <h2 id={id} className="font-semibold tracking-tight">
@@ -46,7 +51,7 @@ export default function SettingsPage(): ReactNode {
     <PageContainer>
       <PageHeader
         title="Settings"
-        description="Your profile, how you sign in, and how CalmCash looks on this device."
+        description="Your profile, how you sign in, notifications, and how CalmCash looks on this device."
       />
 
       <div className="flex flex-col gap-8">
@@ -72,6 +77,15 @@ export default function SettingsPage(): ReactNode {
           description="A session ends when you sign out, on its end date, or after a few days without use. Resetting your password ends all of them."
         >
           <ActiveSessions />
+        </SettingsSection>
+
+        <SettingsSection
+          id="notifications-heading"
+          anchor="notifications"
+          title="Notifications"
+          description="Choose which alerts and reminders you get, in the app and by e-mail, and how far ahead. Notifications only describe your money; they never record or move it."
+        >
+          <NotificationPreferences />
         </SettingsSection>
 
         <SettingsSection

@@ -579,8 +579,9 @@ reflected immediately because nothing is cached.
   constraint for count and range; order by the API). Default `[8000]`; `[]` turns early alerts off.
 - Status, decided by **exact** comparisons (79.996 % has not reached an 80 % alert):
   `over_budget` (spent > limit), `limit_reached` (spent = limit), `approaching_limit` (spent ≥ a
-  threshold), `on_track`, and `not_applicable` (period not started). Alerts are derived on every
-  read, never stored or sent, so repeated page loads cannot create duplicate alerts.
+  threshold), `on_track`, and `not_applicable` (period not started). On the budget pages alerts
+  are derived on every read, so page loads never create anything; since Phase 9 the worker stores
+  and sends each threshold alert once per budget period (§3f).
 - **No double counting in totals.** One active budget per scope, currency, and period may cover a
   given day (overlaps are refused with `409`, checked under a per-user advisory lock). Summary totals
   per cadence use the overall budget when one exists, otherwise the category budgets except a
@@ -629,8 +630,9 @@ voided`); restoring the transaction is the way back, so one cycle can never hold
   restarts the schedule from the new start date, which must come after every recorded or skipped
   occurrence; postponed rows are dropped. `end` sets the last date (not before recorded history)
   and drops later postponements; a schedule with nothing left to expect is `completed`.
-- **No scheduler.** Due and overdue states are derived per request from persisted rules; nothing
-  is recorded automatically and no notification is sent (Phase 9).
+- **No scheduler for states.** Due and overdue states are derived per request from persisted
+  rules; nothing is ever recorded automatically. Since Phase 9 the worker reads these states to send
+  reminders (§3f) but never changes them.
 
 ### Subscriptions
 
@@ -790,45 +792,114 @@ the file removed inside one database transaction, so a storage failure keeps bot
 was changed"). No account or user deletion exists yet; when it is added, receipt files must be
 removed with it (a cascade deletes only the rows). Uploaded files are **not** scanned for malware.
 
+## 3f. Notifications and automation (Phase 9)
+
+Five additive tables (migration `20261028091500_notifications_and_automation`); nothing existing was
+changed. None of them holds money or can move it: notifications describe the ledger, and the worker
+reads balances and spending through the existing services only. Behaviour, identities, and catch-up
+rules are in [architecture.md §18](./architecture.md#18-notifications-and-automation-phase-9).
+
+### `notification_preferences` (one row per user, optional)
+
+`user_id` is the primary key. Ten booleans (`<category>_in_app`, `<category>_email` for budget
+alerts, upcoming payments, overdue payments, subscription renewals, monthly summary),
+`payment_lead_days` and `subscription_lead_days` (CHECK: 1, 3, or 7), and
+`include_recurring_income`. **No row means the defaults** (in-app on, e-mail off, 3 days, no
+income reminders), so existing users needed no backfill; the row is created on the first change.
+
+### `notifications` (one logical event)
+
+| Column                    | Meaning                                                                                          |
+| ------------------------- | ------------------------------------------------------------------------------------------------ |
+| `type`                    | `notification_type` enum (identical to the shared `NOTIFICATION_TYPES`; asserted by a test).     |
+| `dedupe_key`              | The event's identity; **unique per user** (`(user_id, dedupe_key)`), CHECK `^[A-Za-z0-9:._-]+$`. |
+| `title`, `body`           | Plain text written by the API (≤ 160 / ≤ 1000); never markup.                                    |
+| `target`                  | JSON navigation target of identifiers only, validated with Zod on every read (CHECK: object).    |
+| `in_app`                  | Shown in the center (false when it exists only to be e-mailed).                                  |
+| `read_at`, `dismissed_at` | Read state and hiding; dismissed rows are kept so their identity still prevents repeats.         |
+
+Only identifiers, dates, and the plain-text sentence are stored; figures in e-mails are recomputed
+from the ledger when sent.
+
+### `notification_deliveries` (the e-mail outbox)
+
+One row per notification and channel (`(notification_id, channel)` unique; `delivery_channel` has
+only `email`). `status` (`pending`, `processing`, `sent`, `retry_scheduled`, `failed`,
+`suppressed`), `attempts`/`max_attempts` (≤ 20), `next_attempt_at`, `expires_at`, the lease
+(`locked_by`, `locked_until`), `last_error_code` (sanitised, `^[a-z0-9_]+$`), `outcome_uncertain`
+(an attempt may have been delivered), `sent_at`, `completed_at`. CHECKs keep the lease present
+exactly while `processing`, `sent_at` exactly when `sent`, and `completed_at` exactly in final
+states. Deleting a notification deletes its deliveries.
+
+### `automation_jobs` (business events and scheduled work)
+
+`kind` is text (`budget_evaluation`, `daily_review`, `maintenance`; CHECK `^[a-z_]+$`) read through
+Zod, so a kind or payload version a deployment does not know fails that job instead of the worker.
+`payload` is versioned JSON of identifiers and dates. Two keys: `dedupe_key` (unique, permanent:
+"never twice") and `coalesce_key` (unique, set only while `pending` — CHECK — and cleared when
+claimed: "at most one waiting"). Plus `status` (`pending`, `processing`, `succeeded`, `failed`,
+`cancelled`, `expired`), `run_at`, `expires_at`, attempts, lease, `last_error_code`, `completed_at`,
+with the same lease and final-state CHECKs as deliveries. `user_id` is nullable (maintenance) and
+cascades.
+
+### `worker_heartbeats`
+
+One row per worker process (`id` = its name), refreshed at most every 30 s while it works.
+Diagnostics only — Settings shows whether reminders are running — never used for locking.
+
+### Retention
+
+Notifications 400 days; finished deliveries 90 days; finished jobs 30 days; heartbeats 7 days after
+a worker was last seen. Failed rows are kept (with their error code) until then, for diagnosis and
+`requeue-failed`.
+
 ## 4. Integrity rules
 
 ### Constraints
 
-| Table                   | Constraint                                                             | Rule                                                                            |
-| ----------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `users`                 | `users_email_key` (unique)                                             | One account per e-mail address.                                                 |
-| `users`                 | `users_email_lowercase_check`                                          | E-mail stored lower-case, so uniqueness is case-insensitive.                    |
-| `users`                 | `users_password_hash_format_check`                                     | A stored password is always an Argon2id PHC string.                             |
-| `sessions`              | `sessions_token_hash_key` (unique)                                     | One session per token hash.                                                     |
-| `sessions`              | `sessions_*_hash_format_check`                                         | Token and CSRF hashes are 64 lower-case hex characters.                         |
-| `sessions`              | `sessions_expiry_after_creation_check`                                 | `expires_at > created_at`.                                                      |
-| `auth_tokens`           | `auth_tokens_token_hash_key` (unique)                                  | One token per hash; looked up by hash on consumption.                           |
-| `auth_tokens`           | `auth_tokens_token_hash_format_check`, `…_expiry_after_creation_check` | Hex digest; coherent lifetime.                                                  |
-| `accounts`              | `accounts_credit_limit_check`                                          | `credit_limit_minor` is null, or positive on a `credit_card`.                   |
-| `accounts`              | `accounts_institution_not_blank_check`                                 | A provider name, if present, is not blank.                                      |
-| `accounts`              | `accounts_opening_balance_date_check`                                  | `opening_balance_date >= 1900-01-01`.                                           |
-| `accounts`              | `accounts_archived_after_creation_check`                               | `archived_at` is null or not before `created_at`.                               |
-| `categories`            | `categories_user_id_kind_name_key` (unique)                            | Category names are unique per user and kind.                                    |
-| `transactions`          | `transactions_amount_minor_positive_check`                             | `amount_minor > 0`.                                                             |
-| `transactions`          | `transactions_transfer_shape_check`                                    | Transfers: destination present, ≠ source, no category. Others: no destination.  |
-| `transactions`          | `transactions_adjustment_shape_check`                                  | Direction iff adjustment; adjustments have no category, merchant, or method.    |
-| `transactions`          | `transactions_tags_check`                                              | At most 10 tags, none null.                                                     |
-| `transactions`          | `transactions_void_check`, `…_void_reason_not_blank_check`             | A reason only on voided rows; never voided before it was created.               |
-| `transactions`          | `transactions_user_id_idempotency_key_key` (unique)                    | One transaction per user and idempotency key.                                   |
-| `categories`            | `categories_parent_not_self_check`, `…_archived_after_creation_check`  | No self-parent; archived not before created.                                    |
-| `budgets`               | `budgets_limit_minor_positive_check`                                   | `limit_minor > 0`.                                                              |
-| `budgets`               | `budgets_date_range_check`                                             | `end_date` is null or ≥ `start_date`.                                           |
-| `budgets`               | `budgets_custom_period_end_date_check`                                 | `custom` periods require an `end_date`.                                         |
-| `budgets`               | `budgets_alert_thresholds_check`                                       | At most 3 thresholds, none null, each 100–9900 bp.                              |
-| `recurring_schedules`   | `…_type_check`, `…_amount_minor_positive_check`, `…_interval_check`    | Income or expense only; positive amount; interval 1–52.                         |
-| `recurring_schedules`   | `…_subscription_check`                                                 | Subscriptions are expenses; only subscriptions are cancelled, with an end date. |
-| `recurring_schedules`   | `…_date_range_check`, `…_cursor_check`, `…_lifecycle_check`            | Coherent dates and cursor; paused/archived/cancelled not before creation.       |
-| `scheduled_occurrences` | unique `(schedule_id, scheduled_date)`, unique `transaction_id`        | One row per cycle; one occurrence per transaction.                              |
-| `scheduled_occurrences` | `…_due_date_check`, `…_state_check`                                    | Due date never earlier; transaction iff recorded; resolved time iff resolved.   |
-| `savings_goals`         | `…_target_minor_positive_check`, `…_lifecycle_check`                   | Positive target; lifecycle times not before creation.                           |
-| `goal_contributions`    | `…_amount_minor_not_zero_check`                                        | A contribution always changes the tracked amount.                               |
-| all                     | `*_currency_format_check`                                              | `currency ~ '^[A-Z]{3}$'`.                                                      |
-| all                     | `*_name_not_blank_check` / `*_description_not_blank_check`             | Text identifiers cannot be blank.                                               |
+| Table                                        | Constraint                                                             | Rule                                                                            |
+| -------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `users`                                      | `users_email_key` (unique)                                             | One account per e-mail address.                                                 |
+| `users`                                      | `users_email_lowercase_check`                                          | E-mail stored lower-case, so uniqueness is case-insensitive.                    |
+| `users`                                      | `users_password_hash_format_check`                                     | A stored password is always an Argon2id PHC string.                             |
+| `sessions`                                   | `sessions_token_hash_key` (unique)                                     | One session per token hash.                                                     |
+| `sessions`                                   | `sessions_*_hash_format_check`                                         | Token and CSRF hashes are 64 lower-case hex characters.                         |
+| `sessions`                                   | `sessions_expiry_after_creation_check`                                 | `expires_at > created_at`.                                                      |
+| `auth_tokens`                                | `auth_tokens_token_hash_key` (unique)                                  | One token per hash; looked up by hash on consumption.                           |
+| `auth_tokens`                                | `auth_tokens_token_hash_format_check`, `…_expiry_after_creation_check` | Hex digest; coherent lifetime.                                                  |
+| `accounts`                                   | `accounts_credit_limit_check`                                          | `credit_limit_minor` is null, or positive on a `credit_card`.                   |
+| `accounts`                                   | `accounts_institution_not_blank_check`                                 | A provider name, if present, is not blank.                                      |
+| `accounts`                                   | `accounts_opening_balance_date_check`                                  | `opening_balance_date >= 1900-01-01`.                                           |
+| `accounts`                                   | `accounts_archived_after_creation_check`                               | `archived_at` is null or not before `created_at`.                               |
+| `categories`                                 | `categories_user_id_kind_name_key` (unique)                            | Category names are unique per user and kind.                                    |
+| `transactions`                               | `transactions_amount_minor_positive_check`                             | `amount_minor > 0`.                                                             |
+| `transactions`                               | `transactions_transfer_shape_check`                                    | Transfers: destination present, ≠ source, no category. Others: no destination.  |
+| `transactions`                               | `transactions_adjustment_shape_check`                                  | Direction iff adjustment; adjustments have no category, merchant, or method.    |
+| `transactions`                               | `transactions_tags_check`                                              | At most 10 tags, none null.                                                     |
+| `transactions`                               | `transactions_void_check`, `…_void_reason_not_blank_check`             | A reason only on voided rows; never voided before it was created.               |
+| `transactions`                               | `transactions_user_id_idempotency_key_key` (unique)                    | One transaction per user and idempotency key.                                   |
+| `categories`                                 | `categories_parent_not_self_check`, `…_archived_after_creation_check`  | No self-parent; archived not before created.                                    |
+| `budgets`                                    | `budgets_limit_minor_positive_check`                                   | `limit_minor > 0`.                                                              |
+| `budgets`                                    | `budgets_date_range_check`                                             | `end_date` is null or ≥ `start_date`.                                           |
+| `budgets`                                    | `budgets_custom_period_end_date_check`                                 | `custom` periods require an `end_date`.                                         |
+| `budgets`                                    | `budgets_alert_thresholds_check`                                       | At most 3 thresholds, none null, each 100–9900 bp.                              |
+| `recurring_schedules`                        | `…_type_check`, `…_amount_minor_positive_check`, `…_interval_check`    | Income or expense only; positive amount; interval 1–52.                         |
+| `recurring_schedules`                        | `…_subscription_check`                                                 | Subscriptions are expenses; only subscriptions are cancelled, with an end date. |
+| `recurring_schedules`                        | `…_date_range_check`, `…_cursor_check`, `…_lifecycle_check`            | Coherent dates and cursor; paused/archived/cancelled not before creation.       |
+| `scheduled_occurrences`                      | unique `(schedule_id, scheduled_date)`, unique `transaction_id`        | One row per cycle; one occurrence per transaction.                              |
+| `scheduled_occurrences`                      | `…_due_date_check`, `…_state_check`                                    | Due date never earlier; transaction iff recorded; resolved time iff resolved.   |
+| `savings_goals`                              | `…_target_minor_positive_check`, `…_lifecycle_check`                   | Positive target; lifecycle times not before creation.                           |
+| `goal_contributions`                         | `…_amount_minor_not_zero_check`                                        | A contribution always changes the tracked amount.                               |
+| `notification_preferences`                   | `…_payment_lead_days_check`, `…_subscription_lead_days_check`          | Lead times are 1, 3, or 7 days.                                                 |
+| `notifications`                              | unique `(user_id, dedupe_key)`, `…_dedupe_key_format_check`            | One record per logical event; identities are IDs, dates, codes, numbers.        |
+| `notifications`                              | `…_title_not_blank_check`, `…_target_object_check`                     | A title; a target, when present, is a JSON object.                              |
+| `notification_deliveries`                    | unique `(notification_id, channel)`, `…_attempts_check`                | One e-mail per notification; bounded attempts.                                  |
+| `notification_deliveries`, `automation_jobs` | `…_lease_check`, `…_completed_check`, `…_error_code_format_check`      | Lease iff processing; completion time iff final; sanitised error codes.         |
+| `notification_deliveries`                    | `…_sent_check`                                                         | `sent_at` iff sent.                                                             |
+| `automation_jobs`                            | unique `dedupe_key`, unique `coalesce_key`, `…_coalesce_pending_check` | Scheduled work once; at most one waiting event per key.                         |
+| `automation_jobs`                            | `…_kind_format_check`, `…_payload_object_check`, `…_attempts_check`    | Safe kind names; object payloads; bounded attempts.                             |
+| all                                          | `*_currency_format_check`                                              | `currency ~ '^[A-Z]{3}$'`.                                                      |
+| all                                          | `*_name_not_blank_check` / `*_description_not_blank_check`             | Text identifiers cannot be blank.                                               |
 
 Type-dependent balance rules (no negative cash, savings, or wallet balances) are enforced by the
 shared `accountRuleViolations` on every account create and update, and on every transaction write
@@ -845,22 +916,24 @@ line of defence against a buggy code path or a manual query.
 
 ### Foreign keys and deletion behaviour
 
-| Reference                                     | On delete   | Why                                                                        |
-| --------------------------------------------- | ----------- | -------------------------------------------------------------------------- |
-| `*.user_id → users`                           | `CASCADE`   | Deleting a user removes all of their data.                                 |
-| `transactions.account_id → accounts`          | `NO ACTION` | An account with history cannot be deleted directly (archive it instead).   |
-| `transactions.transfer_account_id → accounts` | `NO ACTION` | Same as above for transfer destinations.                                   |
-| `transactions.category_id → categories`       | `SET NULL`  | Deleting a category un-categorises its transactions; amounts are kept.     |
-| `categories.parent_id → categories`           | `NO ACTION` | A category with subcategories cannot be deleted from under them.           |
-| `budgets.category_id → categories`            | `NO ACTION` | Prevents silently widening a budget to "all categories".                   |
-| `recurring_schedules.account_id/category_id`  | `NO ACTION` | Accounts and categories are archived, never deleted, while plans use them. |
-| `scheduled_occurrences.schedule_id`           | `CASCADE`   | An occurrence has no meaning without its schedule (never orphaned).        |
-| `scheduled_occurrences.transaction_id`        | `NO ACTION` | Transactions are voided, never deleted.                                    |
-| `goal_contributions.goal_id`                  | `CASCADE`   | Contributions belong to their goal (goals are archived, not deleted).      |
-| `statement_imports.account_id`                | `NO ACTION` | Accounts are archived, never deleted, while imports refer to them.         |
-| `statement_import_rows.batch_id`              | `CASCADE`   | Staged rows belong to their import.                                        |
-| `statement_import_rows.*_transaction_id`      | `NO ACTION` | Transactions are voided, never deleted.                                    |
-| `transaction_receipts.transaction_id`         | `NO ACTION` | Same: a receipt stays with its (possibly voided) transaction.              |
+| Reference                                                            | On delete   | Why                                                                        |
+| -------------------------------------------------------------------- | ----------- | -------------------------------------------------------------------------- |
+| `*.user_id → users`                                                  | `CASCADE`   | Deleting a user removes all of their data.                                 |
+| `transactions.account_id → accounts`                                 | `NO ACTION` | An account with history cannot be deleted directly (archive it instead).   |
+| `transactions.transfer_account_id → accounts`                        | `NO ACTION` | Same as above for transfer destinations.                                   |
+| `transactions.category_id → categories`                              | `SET NULL`  | Deleting a category un-categorises its transactions; amounts are kept.     |
+| `categories.parent_id → categories`                                  | `NO ACTION` | A category with subcategories cannot be deleted from under them.           |
+| `budgets.category_id → categories`                                   | `NO ACTION` | Prevents silently widening a budget to "all categories".                   |
+| `recurring_schedules.account_id/category_id`                         | `NO ACTION` | Accounts and categories are archived, never deleted, while plans use them. |
+| `scheduled_occurrences.schedule_id`                                  | `CASCADE`   | An occurrence has no meaning without its schedule (never orphaned).        |
+| `scheduled_occurrences.transaction_id`                               | `NO ACTION` | Transactions are voided, never deleted.                                    |
+| `goal_contributions.goal_id`                                         | `CASCADE`   | Contributions belong to their goal (goals are archived, not deleted).      |
+| `statement_imports.account_id`                                       | `NO ACTION` | Accounts are archived, never deleted, while imports refer to them.         |
+| `statement_import_rows.batch_id`                                     | `CASCADE`   | Staged rows belong to their import.                                        |
+| `statement_import_rows.*_transaction_id`                             | `NO ACTION` | Transactions are voided, never deleted.                                    |
+| `transaction_receipts.transaction_id`                                | `NO ACTION` | Same: a receipt stays with its (possibly voided) transaction.              |
+| `notifications.user_id`, `notification_*`, `automation_jobs.user_id` | `CASCADE`   | Notifications, deliveries, preferences, and jobs belong to their user.     |
+| `notification_deliveries.notification_id`                            | `CASCADE`   | A delivery has no meaning without its notification.                        |
 
 `NO ACTION` is used instead of `RESTRICT` on purpose. The check runs at the end of the statement,
 so deleting a user, which cascades to both transactions and accounts, still succeeds, while
@@ -883,26 +956,33 @@ database level later if needed.
   user's `timezone`.
 - **Indexes:**
 
-  | Index                                                        | Serves                                              |
-  | ------------------------------------------------------------ | --------------------------------------------------- |
-  | `transactions (user_id, occurred_at DESC)`                   | A user's timeline, newest first; dashboard periods. |
-  | `transactions (account_id, occurred_at DESC)`                | An account ledger; balance calculation.             |
-  | `transactions (transfer_account_id)`                         | Incoming transfers for an account's balance.        |
-  | `transactions (category_id)`                                 | Category reports and `ON DELETE SET NULL`.          |
-  | `budgets (user_id)`, `budgets (category_id)`                 | A user's budgets; FK checks.                        |
-  | `sessions (user_id)`                                         | A user's sessions (list, revoke others).            |
-  | `sessions (expires_at)`, `auth_tokens (expires_at)`          | Cleanup of ended records.                           |
-  | `auth_tokens (user_id, purpose)`                             | Replacing a user's outstanding tokens.              |
-  | `accounts (user_id, archived_at)`                            | A user's accounts, filtered by status (Phase 4).    |
-  | `transactions USING GIN (tags)`                              | Tag filters and search (Phase 5).                   |
-  | unique `transactions (user_id, idempotency_key)`             | Retried creates find their first row (Phase 5).     |
-  | `categories (parent_id)`                                     | Subcategories; category filters include children.   |
-  | `recurring_schedules (user_id, archived_at)`                 | A user's schedules by status (Phase 7).             |
-  | unique `scheduled_occurrences (schedule_id, scheduled_date)` | Occurrence identity; a schedule's rows.             |
-  | `scheduled_occurrences (user_id, due_date)`                  | A user's occurrences by due date.                   |
-  | `savings_goals (user_id, archived_at)`                       | A user's goals by status.                           |
-  | `goal_contributions (goal_id, contributed_on)`               | A goal's history and its tracked total.             |
-  | unique `categories (user_id, kind, name)`                    | Also serves "categories of a user".                 |
+  | Index                                                                      | Serves                                              |
+  | -------------------------------------------------------------------------- | --------------------------------------------------- |
+  | `transactions (user_id, occurred_at DESC)`                                 | A user's timeline, newest first; dashboard periods. |
+  | `transactions (account_id, occurred_at DESC)`                              | An account ledger; balance calculation.             |
+  | `transactions (transfer_account_id)`                                       | Incoming transfers for an account's balance.        |
+  | `transactions (category_id)`                                               | Category reports and `ON DELETE SET NULL`.          |
+  | `budgets (user_id)`, `budgets (category_id)`                               | A user's budgets; FK checks.                        |
+  | `sessions (user_id)`                                                       | A user's sessions (list, revoke others).            |
+  | `sessions (expires_at)`, `auth_tokens (expires_at)`                        | Cleanup of ended records.                           |
+  | `auth_tokens (user_id, purpose)`                                           | Replacing a user's outstanding tokens.              |
+  | `accounts (user_id, archived_at)`                                          | A user's accounts, filtered by status (Phase 4).    |
+  | `transactions USING GIN (tags)`                                            | Tag filters and search (Phase 5).                   |
+  | unique `transactions (user_id, idempotency_key)`                           | Retried creates find their first row (Phase 5).     |
+  | `categories (parent_id)`                                                   | Subcategories; category filters include children.   |
+  | `recurring_schedules (user_id, archived_at)`                               | A user's schedules by status (Phase 7).             |
+  | unique `scheduled_occurrences (schedule_id, scheduled_date)`               | Occurrence identity; a schedule's rows.             |
+  | `scheduled_occurrences (user_id, due_date)`                                | A user's occurrences by due date.                   |
+  | `savings_goals (user_id, archived_at)`                                     | A user's goals by status.                           |
+  | `goal_contributions (goal_id, contributed_on)`                             | A goal's history and its tracked total.             |
+  | `notifications (user_id, created_at DESC)`                                 | The notification center, newest first (Phase 9).    |
+  | `notifications (user_id, read_at)`                                         | Unread counts.                                      |
+  | `notifications (created_at)`                                               | Retention.                                          |
+  | `automation_jobs (status, run_at)`                                         | Claiming due jobs; expiring and recovering them.    |
+  | `notification_deliveries (status, next_attempt_at)`                        | Claiming due e-mails.                               |
+  | `notification_deliveries (user_id, status)`                                | Suppressing a user's queued e-mails.                |
+  | `automation_jobs (completed_at)`, `notification_deliveries (completed_at)` | Retention.                                          |
+  | unique `categories (user_id, kind, name)`                                  | Also serves "categories of a user".                 |
 
   Search (`q`) uses case-insensitive `LIKE` on description, merchant, notes, and category names,
   scoped by `user_id` (a personal ledger is small); wildcards in the search text are escaped. A
@@ -960,6 +1040,11 @@ literal unions are identical, both at runtime and at the type level.
   default alert; four new tables with their indexes, foreign keys, and CHECK constraints. Nothing
   existing is altered or dropped. Applied with `prisma migrate dev`; the drift check reports no
   difference.
+- **Phase 9 migration** (`20261028091500_notifications_and_automation`) is additive: four enums
+  (`notification_type`, `delivery_channel`, `notification_delivery_status`,
+  `automation_job_status`), five new tables with their indexes, foreign keys, and CHECK constraints.
+  No existing table, column, or row changes; users without a preferences row get the defaults.
+  Applied with `prisma migrate deploy` (never resets); the drift check reports no difference.
 - **Check for drift:**
   `pnpm exec prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code`
   exits with 0 when the database matches the schema.

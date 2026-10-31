@@ -22,6 +22,7 @@ import type { CategoriesModuleDependencies } from './modules/categories/categori
 import type { DashboardModuleDependencies } from './modules/dashboard/dashboard.routes';
 import type { GoalsModuleDependencies } from './modules/goals/goals.routes';
 import type { ImportsModuleDependencies } from './modules/imports/imports.routes';
+import type { NotificationsModuleDependencies } from './modules/notifications';
 import type { ReceiptsModuleDependencies } from './modules/receipts/receipts.routes';
 import type { RecurringModuleDependencies } from './modules/recurring';
 import type { TagsModuleDependencies } from './modules/tags/tags.routes';
@@ -46,6 +47,7 @@ export interface AppDependencies {
   goals: GoalsModuleDependencies;
   imports: ImportsModuleDependencies;
   receipts: ReceiptsModuleDependencies;
+  notifications: NotificationsModuleDependencies;
 }
 
 /**
@@ -68,6 +70,7 @@ export function createApp({
   goals,
   imports,
   receipts,
+  notifications,
 }: AppDependencies): Express {
   const app = express();
 
@@ -112,6 +115,7 @@ export function createApp({
       goals,
       imports,
       receipts,
+      notifications,
       authConfig: { session: config.session, webAppUrl: config.webAppUrl },
     }),
   );

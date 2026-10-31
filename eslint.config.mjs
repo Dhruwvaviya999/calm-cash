@@ -95,8 +95,8 @@ export default defineConfig(
   {
     files: [
       'apps/web/src/{components,hooks,lib,services,types}/**/*.{ts,tsx}',
-      'apps/web/src/features/{dashboard,accounts,transactions,budgets,recurring,subscriptions,goals,planning,imports,receipts}/**/*.{ts,tsx}',
-      'apps/web/src/app/*/{dashboard,accounts,transactions,budgets,imports}/**/*.{ts,tsx}',
+      'apps/web/src/features/{dashboard,accounts,transactions,budgets,recurring,subscriptions,goals,planning,imports,receipts,notifications}/**/*.{ts,tsx}',
+      'apps/web/src/app/*/{dashboard,accounts,transactions,budgets,imports,notifications}/**/*.{ts,tsx}',
     ],
     rules: {
       'no-restricted-imports': [
@@ -107,6 +107,32 @@ export default defineConfig(
               group: ['@/fixtures', '@/fixtures/*', '**/fixtures/*'],
               message:
                 'Sample fixtures are prototype-only and must not reach shared code, services, or live pages.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+
+  // The worker's engine is bundled into apps/worker, which has no HTTP stack: it imports services,
+  // repositories, and helpers directly, never Express or a module index (those export routers).
+  {
+    files: ['apps/api/src/automation/**/*.ts'],
+    ignores: ['apps/api/src/automation/**/*.test.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [{ name: 'express', message: 'The worker bundle has no HTTP stack.' }],
+          patterns: [
+            {
+              regex: '^\\.\\./modules/[^/]+$',
+              message:
+                'Import the service, repository, or helper file directly: module index files also export Express routers, which must not reach the worker bundle.',
+            },
+            {
+              group: ['**/*.routes', '**/*.controller', '**/middleware/*', '**/app'],
+              message: 'HTTP code must not reach the worker bundle.',
             },
           ],
         },

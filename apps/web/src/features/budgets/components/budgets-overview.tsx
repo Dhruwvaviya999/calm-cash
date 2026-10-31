@@ -43,6 +43,7 @@ import { NativeSelect } from '@/components/ui/native-select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useSignedInSession } from '@/features/auth';
 import { useAsyncResource } from '@/hooks/use-async-resource';
+import { useLinkedId } from '@/hooks/use-linked-id';
 import { formatDate } from '@/lib/format';
 import { describeRequestError } from '@/lib/form-errors';
 import {
@@ -190,7 +191,9 @@ export function BudgetsOverview(): ReactNode {
   const { state, reload, refresh } = useAsyncResource(load);
 
   const [formMode, setFormMode] = useState<BudgetFormMode | undefined>();
-  const [detailsId, setDetailsId] = useState<string | undefined>();
+  // A notification links here with `?budget=`: open that budget's details once it is loaded.
+  const linkedBudget = useLinkedId('budget');
+  const [detailsId, setDetailsId] = useState<string | undefined>(linkedBudget);
   const [archiveTarget, setArchiveTarget] = useState<BudgetWithProgressDto | undefined>();
   const [notice, setNotice] = useState<Notice>();
 
@@ -396,6 +399,15 @@ export function BudgetsOverview(): ReactNode {
       </div>
 
       {notice !== undefined && <FormMessage tone={notice.tone}>{notice.message}</FormMessage>}
+      {linkedBudget !== undefined &&
+        detailsId === linkedBudget &&
+        data !== undefined &&
+        details === undefined && (
+          <FormMessage tone="info" title="That budget is not in this list">
+            It may have been archived or removed since the notification was sent. Archived budgets
+            are under “Archived”.
+          </FormMessage>
+        )}
 
       <div aria-busy={state.status === 'loading'}>{content}</div>
 

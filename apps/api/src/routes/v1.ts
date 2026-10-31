@@ -27,6 +27,10 @@ import {
 import { createGoalsRouter, type GoalsModuleDependencies } from '../modules/goals/goals.routes';
 import { createHealthRouter } from '../modules/health/health.routes';
 import {
+  createNotificationsRouter,
+  type NotificationsModuleDependencies,
+} from '../modules/notifications';
+import {
   createImportsRouter,
   type ImportsModuleDependencies,
 } from '../modules/imports/imports.routes';
@@ -62,6 +66,7 @@ export interface V1RouterDependencies {
   goals: GoalsModuleDependencies;
   imports: ImportsModuleDependencies;
   receipts: ReceiptsModuleDependencies;
+  notifications: NotificationsModuleDependencies;
 }
 
 /**
@@ -121,6 +126,10 @@ export function createV1Router(dependencies: V1RouterDependencies): Router {
   // Statement imports (Phase 8): approved rows and balance corrections are recorded only through
   // the transactions service, with its locks and rules.
   router.use('/imports', createImportsRouter(dependencies.imports, transactions, boundary));
+
+  // Notifications (Phase 9): the center and preferences. Notifications themselves are created by
+  // the background worker (apps/worker) from events and schedules, never by a request.
+  router.use('/notifications', createNotificationsRouter(dependencies.notifications, boundary));
 
   return router;
 }

@@ -56,6 +56,7 @@ import {
   type ScheduleLifecycle,
 } from '@/features/recurring';
 import { useAsyncResource } from '@/hooks/use-async-resource';
+import { useLinkedId } from '@/hooks/use-linked-id';
 import { formatDate } from '@/lib/format';
 import { describeRequestError } from '@/lib/form-errors';
 import {
@@ -152,7 +153,8 @@ export function SubscriptionsOverview(): ReactNode {
   const [version, setVersion] = useState(0);
   const [notice, setNotice] = useState<PlanningNotice>();
   const [formMode, setFormMode] = useState<ScheduleFormMode | undefined>();
-  const [detailsId, setDetailsId] = useState<string | undefined>();
+  // A renewal reminder links here with `?schedule=`; the sheet loads it (and explains if it is gone).
+  const [detailsId, setDetailsId] = useState<string | undefined>(useLinkedId('schedule'));
   const [cancelling, setCancelling] = useState<SubscriptionDto | undefined>();
   const { references } = usePlanningReferences();
 

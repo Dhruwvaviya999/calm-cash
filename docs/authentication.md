@@ -186,6 +186,7 @@ logs name only the template).
 | `TRUST_PROXY_HOPS`            | Trusted reverse proxies for client IPs                   | `0`                                      |
 | `SESSION_MAX_AGE_DAYS`        | Absolute session lifetime (1–90)                         | `14`                                     |
 | `SESSION_IDLE_TIMEOUT_HOURS`  | Idle timeout (≤ max age)                                 | `72`                                     |
+| `EMAIL_DELIVERY_MODE`         | `mailpit`, `smtp` (production only), or `disabled`       | `mailpit` outside production             |
 | `SMTP_HOST` / `SMTP_PORT`     | SMTP server                                              | `localhost` / `1025` (Mailpit)           |
 | `SMTP_SECURE`                 | Implicit TLS (port 465)                                  | `false`                                  |
 | `SMTP_USER` / `SMTP_PASSWORD` | SMTP credentials (both or neither)                       | none                                     |
@@ -193,16 +194,20 @@ logs name only the template).
 | `TEST_DATABASE_URL`           | Disposable `*_test` database for integration tests       | — (tests only)                           |
 
 In production (`NODE_ENV=production`) the API refuses to start unless every CORS origin is
-`https`, and `SMTP_HOST` and `EMAIL_FROM` are set; cookies are `Secure` with the `__Host-` prefix,
-and SMTP requires STARTTLS unless `SMTP_SECURE=true`. Invalid configuration is reported by variable
-name only — values (passwords, URLs) are never printed.
+`https` and `EMAIL_DELIVERY_MODE` is set (`smtp` then requires `SMTP_HOST` and `EMAIL_FROM`);
+cookies are `Secure` with the `__Host-` prefix, and SMTP requires STARTTLS unless
+`SMTP_SECURE=true`. Outside production only `mailpit` (a local host, no credentials) or `disabled`
+is accepted, so a development `.env` holding real mail credentials refuses to start rather than
+sending mail (Phase 9; the worker applies the same rules). Invalid configuration is reported by
+variable name only — values (passwords, URLs) are never printed.
 
 **Production checklist**
 
 1. Serve the web app and the API over HTTPS on the same site (e.g. `app.` and `api.` subdomains).
 2. Set `NODE_ENV=production`, `CORS_ORIGINS=https://app…`, `NEXT_PUBLIC_API_URL=https://api…`
    (at web build time), and `TRUST_PROXY_HOPS` for your load balancer.
-3. Configure a real SMTP provider (`SMTP_*`, `EMAIL_FROM` on a domain with SPF/DKIM/DMARC).
+3. Configure a real SMTP provider (`EMAIL_DELIVERY_MODE=smtp`, `SMTP_*`, `EMAIL_FROM` on a domain
+   with SPF/DKIM/DMARC) for both the API and the worker.
 4. Run `pnpm db:deploy` before starting the new API version.
 5. Run a single API instance, or move rate limiting to a shared store first.
 

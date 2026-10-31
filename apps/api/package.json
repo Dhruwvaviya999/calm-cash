@@ -4,6 +4,9 @@
   "private": true,
   "description": "CalmCash REST API (Express + TypeScript).",
   "type": "module",
+  "exports": {
+    "./automation": "./src/automation/index.ts"
+  },
   "scripts": {
     "dev": "node --watch --env-file-if-exists=../../.env --import tsx src/server.ts",
     "build": "tsup",

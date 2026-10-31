@@ -42,7 +42,7 @@ pnpm mail:up
 # 4. Apply all migrations
 pnpm db:migrate
 
-# 5. Start the API and the web app together
+# 5. Start the API, the web app, and the background worker together
 pnpm dev
 ```
 
@@ -52,8 +52,12 @@ Then open:
   at `/register`, then confirm it from the inbox below and sign in. In **Settings → About and
   diagnostics**, the "System status" card should report the API as **Online** and the database as
   **Connected**.
-- E-mail inbox (Mailpit): <http://localhost:8025> — confirmation and password-reset messages land
-  here; nothing leaves your machine.
+- E-mail inbox (Mailpit): <http://localhost:8025> — confirmation, password-reset, and notification
+  messages land here; nothing leaves your machine. `EMAIL_DELIVERY_MODE=mailpit` (the default
+  outside production) refuses any other mail server and any SMTP credentials, so a `.env` holding a
+  real account's settings stops the API and the worker at start-up instead of sending mail.
+- Notifications: the bell in the header and `/notifications`. They are created by the worker
+  (`pnpm dev` runs it); without a worker nothing new appears, and Settings → Notifications says so.
 - API liveness: <http://localhost:4000/api/v1/health>
 - API readiness: <http://localhost:4000/api/v1/health/ready>
 
@@ -66,7 +70,10 @@ All commands run from the repository root.
 
 | Command                 | What it does                                                                      |
 | ----------------------- | --------------------------------------------------------------------------------- |
-| `pnpm dev`              | Runs the API (`:4000`, restarts on change) and the web app (`:3000`, hot reload). |
+| `pnpm dev`              | Runs the API (`:4000`), the web app (`:3000`), and the worker, all in watch mode. |
+| `pnpm dev:worker`       | Runs only the background worker (watch mode).                                     |
+| `pnpm worker:start`     | Runs the built worker (`apps/worker/dist/main.js`).                               |
+| `pnpm worker:status`    | Prints job and e-mail queue counts and recently seen workers.                     |
 | `pnpm build`            | Production builds: `apps/api/dist/server.js` (tsup) and `apps/web/.next` (Next).  |
 | `pnpm lint`             | ESLint across the workspace; warnings fail the run.                               |
 | `pnpm typecheck`        | `tsc` for root tooling, the shared package, the API, and the web app.             |
@@ -90,7 +97,21 @@ Run the production builds locally:
 pnpm build
 pnpm --filter @calmcash/api start        # node dist/server.js (reads the root .env)
 pnpm --filter @calmcash/web start        # next start on :3000
+pnpm --filter @calmcash/worker start     # node dist/main.js (reads the root .env)
 ```
+
+**The worker** reads the same `.env` as the API (`parseWorkerEnv`, same e-mail rules) plus the
+optional `WORKER_*` settings in `.env.example`. Useful while developing:
+
+```bash
+WORKER_DAILY_REVIEW_HOUR=0 pnpm dev:worker            # today's reminders right away, not at 08:00
+WORKER_HEALTH_PORT=4300 pnpm dev:worker               # GET http://127.0.0.1:4300/health
+pnpm worker:status                                    # pending/failed jobs and e-mails
+pnpm --filter @calmcash/worker requeue-failed <id>    # retry a failed job after fixing its cause
+```
+
+Failed jobs and e-mails keep a short `last_error_code` (never a message) in `automation_jobs` and
+`notification_deliveries`; look there first when something did not arrive.
 
 ## 4. Database
 
@@ -156,10 +177,12 @@ concurrency suite sends parallel requests that each use their own pooled connect
 exercise PostgreSQL's row locks for real. Integration tests use an in-memory e-mail service and
 never send mail.
 
-**Running a second API by hand** (for example against the test database for a browser check):
-override `DATABASE_URL`, `API_PORT`, `CORS_ORIGINS`, and the `SMTP_*` variables (`SMTP_HOST=localhost`,
-`SMTP_PORT=1025`, empty `SMTP_USER`/`SMTP_PASSWORD`) explicitly, because it otherwise inherits the
-root `.env`, including any real mail server configured there.
+**Running a second API or worker by hand** (for example against the test database for a browser
+check): override `DATABASE_URL`, `API_PORT`, `CORS_ORIGINS`, and keep `EMAIL_DELIVERY_MODE=mailpit`
+with `SMTP_HOST=localhost`, `SMTP_PORT=1025`, and empty `SMTP_USER`/`SMTP_PASSWORD`. Outside
+production the API and the worker refuse any other mail server, so an inherited real account can no
+longer send mail by accident. Integration tests and the worker's tests use an in-memory e-mail
+service and never open an SMTP connection.
 
 | Package  | Suites                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -182,6 +205,13 @@ horizontal scrolling at any width.
 **Receipt files in development** are written to `apps/api/.data/receipts` (relative to the API's
 working directory; git-ignored). Deleting that folder does not delete the receipt rows; reset the
 database too to start over. Tests never touch it: they use an in-memory store.
+
+**Worker and notification tests.** The worker engine is tested against the test database in the
+API's integration suite (`src/automation/*.integration.test.ts`): budget alerts through real API
+writes, reminders and subscriptions, monthly summaries, concurrent claims, lease recovery,
+unreadable jobs, retries, expiry, ambiguous and permanent e-mail failures, preference and
+verification suppression, and log privacy. `apps/worker` has unit tests for its health endpoint and
+worker names.
 
 **Before pushing**, run the same gates CI should run:
 
@@ -229,6 +259,21 @@ Start Docker Desktop (or the Docker service) and wait until it reports that it i
 **The API exits with `Invalid environment configuration`**
 The message lists each offending variable by name (values are never printed). Make sure
 `.env` exists in the repository root and compare it with `.env.example`.
+
+**`SMTP_HOST: With EMAIL_DELIVERY_MODE=mailpit only the local Mailpit is allowed`** (API or worker)
+Your `.env` points at a real mail server (for example Gmail) while `NODE_ENV` is not `production`.
+That is refused on purpose. Set `SMTP_HOST=localhost`, `SMTP_PORT=1025`, `SMTP_SECURE=false`, empty
+`SMTP_USER`/`SMTP_PASSWORD`, and a local `EMAIL_FROM`; keep real credentials for production, where
+`EMAIL_DELIVERY_MODE=smtp` is required.
+
+**No reminders or alerts appear**
+Check that the worker runs (`pnpm dev` starts it; Settings → Notifications shows "Reminders are
+running") and `pnpm worker:status`. Reminders are considered once per local day at
+`WORKER_DAILY_REVIEW_HOUR` (08:00); set it to `0` locally to see today's at once.
+
+**`prisma migrate` times out on an advisory lock**
+Another Prisma CLI process still holds the migration lock (a previous `migrate dev` that never
+exited). Stop that process, then run the command again; `pnpm db:deploy` never resets data.
 
 **The web app fails with `Invalid public environment configuration`**
 Create `apps/web/.env.local` from `apps/web/.env.example`. `NEXT_PUBLIC_API_URL` must be an

@@ -112,6 +112,15 @@ export interface RecurringService {
   upcoming: (caller: Caller, query: UpcomingOccurrencesQuery) => Promise<UpcomingOccurrencesDto>;
   /** Like `upcoming` with an explicit range and size, for forecasts (subscriptions). */
   collect: (caller: Caller, options: CollectOptions) => Promise<UpcomingOccurrencesDto>;
+  /**
+   * One occurrence as it stands today, read-only (reminders re-check it before they go out);
+   * `undefined` when the schedule is not the caller's or the date is not, or no longer, one of
+   * its occurrences.
+   */
+  occurrence: (
+    caller: Caller,
+    address: OccurrenceAddress,
+  ) => Promise<OccurrenceActionResultDto | undefined>;
   record: (
     caller: Caller,
     address: OccurrenceAddress,
@@ -801,6 +810,14 @@ export function createRecurringService({
     },
 
     collect,
+
+    occurrence: async (caller, address) => {
+      const schedule = await repository.find(caller.userId, address.scheduleId);
+      if (schedule === null || !isOccurrenceDate(ruleOf(schedule), address.date)) {
+        return undefined;
+      }
+      return loadOccurrence(caller, address);
+    },
 
     record: async (caller, address, input) => {
       // Read first to build the transaction; the claim below re-checks everything under the lock

@@ -3,17 +3,16 @@
 CalmCash is an AI-powered personal finance tracker. The roadmap covers transaction management,
 budgeting, bank statement imports, financial analytics, AI insights, and recurring payments.
 
-> **Status — Phase 8 (bank statement import, receipts, and reconciliation) complete.** On top of
-> Phases 1–7 (foundation, design system, authentication, accounts, transactions, dashboard,
-> budgets and planning), people can import a CSV bank or card statement into an account: they
-> confirm how its columns, dates, and signs are read (nothing ambiguous is guessed), review every
-> row with possible duplicates flagged (within the file, from earlier imports, and in the ledger),
-> link a row to a transaction they already recorded instead of recording it twice, classify rows,
-> and import the approved ones exactly once through the transaction ledger. The statement's own
-> balances are compared with the ledger at the statement's dates, and a correction is recorded only
-> when they approve it. Transactions can carry receipts (JPEG, PNG, WebP, or PDF up to 10 MB),
-> stored privately and served only to their owner. OFX/QFX statements, bank connections, OCR, and
-> malware scanning are not part of this phase.
+> **Status — Phase 9 (notifications, reminders, and background automation) complete.** On top of
+> Phases 1–8 (foundation, design system, authentication, accounts, transactions, dashboard,
+> budgets and planning, statement imports and receipts), a background worker (`apps/worker`) keeps
+> people informed: budget alerts at each budget's own thresholds, reminders before and on the due
+> date of recurring bills (and expected income, if chosen), one overdue reminder, subscription
+> renewal reminders, and a monthly summary per currency — in an in-app notification center and,
+> when someone opts in, by e-mail. Work is durable in PostgreSQL (claimed with `SKIP LOCKED`
+> leases, retried, never duplicated), and notifications never record or move money. Nothing new is
+> generated while no worker runs. E-mail is at least once, not exactly once; outside production it
+> can only reach the local Mailpit. Push, SMS, and browser notifications are not part of this phase.
 
 ## Tech stack
 
@@ -26,6 +25,7 @@ budgeting, bank statement imports, financial analytics, AI insights, and recurri
 | E-mail      | nodemailer over SMTP; Mailpit catches mail locally                                                       |
 | Contracts   | TypeScript 6 (strict), Zod 4 — shared by web and API via `@calmcash/shared`                              |
 | Tooling     | pnpm 11 workspaces, Vitest 5, Supertest, Testing Library + jsdom, ESLint 9 + typescript-eslint, Prettier |
+| Worker      | Node.js 24 process; PostgreSQL job tables (`FOR UPDATE SKIP LOCKED`, leases) — no Redis                  |
 | Local infra | Docker Compose (PostgreSQL, Mailpit)                                                                     |
 
 ## Repository structure
@@ -42,8 +42,10 @@ calmcash/
 │   │       ├── middleware/  Request logging, validation, 404, error handler
 │   │       ├── modules/     Feature modules (health, auth, accounts, transactions, categories, tags,
 │   │       │                dashboard, budgets, recurring, subscriptions, goals, imports,
-│   │       │                receipts)
+│   │       │                receipts, notifications)
+│   │       ├── automation/  Worker engine: jobs, scheduler, alerts, reminders, summaries, e-mail
 │   │       └── routes/      Versioned routers (/api/v1)
+│   ├── worker/              Background worker process (TypeScript): main.ts, cli.ts, health
 │   └── web/                 Next.js web app (TypeScript)
 │       └── src/
 │           ├── app/         Routes: (app) group with the shared shell, boundaries
@@ -78,7 +80,7 @@ cp apps/web/.env.example apps/web/.env.local     # web settings
 pnpm db:up                                       # start PostgreSQL (localhost:5433)
 pnpm mail:up                                     # start Mailpit (SMTP :1025, inbox :8025)
 pnpm db:migrate                                  # apply migrations
-pnpm dev                                         # API on :4000, web on :3000
+pnpm dev                                         # API on :4000, web on :3000, and the worker
 ```
 
 Open <http://localhost:3000> — signed-out visitors land on the sign-in page. Create an account at
@@ -94,8 +96,11 @@ as **Connected**. The API health endpoints are
 
 | Script                  | Description                                                |
 | ----------------------- | ---------------------------------------------------------- |
-| `pnpm dev`              | Start the API and the web app together in watch mode.      |
-| `pnpm build`            | Build the API bundle and the Next.js production build.     |
+| `pnpm dev`              | Start the API, the web app, and the worker in watch mode.  |
+| `pnpm dev:worker`       | Start only the background worker (watch mode).             |
+| `pnpm worker:start`     | Run the built worker (production).                         |
+| `pnpm worker:status`    | Show job and e-mail queue counts and recent workers.       |
+| `pnpm build`            | Build the API and worker bundles and the Next.js build.    |
 | `pnpm lint`             | Lint the whole workspace (warnings fail).                  |
 | `pnpm typecheck`        | Type-check every package.                                  |
 | `pnpm test`             | Run all unit and component test suites (no database).      |
