@@ -5,7 +5,7 @@
       "root": "apps/api",
       "framework": "express",
       "entrypoint": "src/server.ts",
-      "buildCommand": "pnpm --dir ../.. db:generate && pnpm build"
+      "buildCommand": "pnpm --dir ../.. db:generate"
     },
     "web": {
       "root": "apps/web",

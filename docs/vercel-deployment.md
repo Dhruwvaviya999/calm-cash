@@ -46,6 +46,11 @@ Use Node.js **24.x** and the repository's pinned **pnpm 11.21.0**. The workspace
 generates Prisma Client; the API build also generates it explicitly from the repository root.
 Allow builds to access workspace source outside each service's directory.
 
+The API service's build command deliberately stops after generating Prisma Client. Vercel then
+bundles `src/server.ts` itself, keeping the output at its repository path so the externalized
+npm packages resolve from `apps/api/node_modules`. Do not add `pnpm build` (tsup) to it: Vercel
+would deploy `dist/` as the function root instead, where those packages cannot be resolved.
+
 Provision Neon PostgreSQL, a real SMTP provider with a verified sender, and a **private**
 Vercel Blob store. Connect the Blob store to this Vercel project. Keep the database and Blob
 stores for previews separate from production. Upload local receipt files to the private store
