@@ -62,6 +62,7 @@ import { useTransactionFilters } from '../use-transaction-filters';
 import { BulkActionBar, BulkEditSheet, type BulkEditAction } from './bulk-actions';
 import { CategoryManagerSheet } from './category-manager-sheet';
 import { TransactionDetailsSheet } from './transaction-details-sheet';
+import { SmartSearch } from './smart-search';
 import { TransactionEntrySheet, type EntrySheetMode } from './transaction-entry-sheet';
 import { TransactionFiltersSheet } from './transaction-filters-sheet';
 import { TransactionHistory } from './transaction-history';
@@ -607,6 +608,14 @@ export function TransactionsPage(): ReactNode {
             </Button>
           </div>
         </div>
+
+        <SmartSearch
+          sort={filters.sort}
+          onApply={(next) => {
+            setSearchDraft(undefined);
+            applyFilters(next);
+          }}
+        />
 
         {chips.length > 0 && (
           <div className="flex flex-wrap items-center gap-2">

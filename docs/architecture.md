@@ -794,3 +794,111 @@ pnpm --filter @calmcash/worker requeue-failed [job-id …]
   person entered); notifications are not security or fraud alerts.
 - E-mail is at least once (see above). Leases and schedules depend on reasonably synchronised
   worker clocks. The upload and authentication rate limits remain per API process.
+
+## 19. AI assistant and insights (Phase 10)
+
+Phase 10 adds an intelligence layer **on top of** the ledger, never inside it. Two modules:
+
+- **`modules/insights`** — deterministic insights computed by fixed rules from recorded
+  transactions: category changes against the previous period, unusually large expenses, frequent
+  payees, income changes, and repeating payments that have no bill or subscription yet. No AI is
+  involved; these work whether or not AI is switched on.
+- **`modules/ai`** — the assistant, transaction drafts, category and merchant suggestions,
+  natural-language search, on-demand reports, and plain-word explanations, using a **local model
+  served by Ollama**. The model is never the source of truth: it plans which read-only tool to run
+  and words the answer; every figure comes from the existing services.
+
+```text
+ browser ──▶ /api/v1/ai/* ──▶ ai.service ──▶ planner (model, JSON schema) ──▶ allowlisted tools
+                                   │                                          (dashboard, accounts,
+                                   │                                           transactions, budgets,
+                                   ▼                                           recurring, goals, insights)
+                         narration (model) ◀── facts text ◀── server-built blocks (exact minor units)
+                                   │
+                          grounding check ── fails ──▶ fixed template wording
+```
+
+### Provider boundary and safety model
+
+- **Local only.** `AiProvider` (`provider/ai-provider.ts`) is the single boundary; the Ollama
+  implementation calls `/api/chat` (non-streaming, `temperature: 0`, JSON-schema `format`,
+  `think: false`) and `/api/tags` from the API process. The browser never talks to Ollama.
+  `OLLAMA_BASE_URL` must be loopback, a private address, a single-label host, or `*.local` /
+  `*.internal`; configuration refuses hosted endpoints, and there is no remote fallback.
+- **No identifiers, SQL, paths, or URLs in the model's vocabulary.** The planner may only name a
+  tool from `AI_TOOL_NAMES` with plain fields (period presets, a month, category or account names,
+  search words, amounts). The server validates the plan with Zod, drops unknown tools, resolves
+  names among the **caller's own** categories and accounts, builds strict arguments with the
+  services' own query schemas, and runs at most three tools as the session's user. Ownership rules
+  are the services' rules; the model cannot widen them.
+- **Untrusted data is fenced.** Descriptions, merchants, names, and earlier turns reach the model
+  only inside `<data>` blocks, with angle brackets and control and invisible formatting characters
+  neutralised; every system prompt says data is never an instruction. Prompts are size-bounded.
+- **Grounding.** The wording of an answer, report, explanation, or follow-up may contain only
+  numbers that appear in the facts it was given (or in the question). One unsupported number and
+  the fixed template is used instead (`narrative: "template"`). Wording is stripped of HTML and
+  links.
+- **Nothing is written by AI.** Drafts are returned to the entry form; suggestions are applied
+  through the ordinary `PATCH /transactions/:id` when the person accepts; repeating-payment
+  candidates open the ordinary planning form. Drafts are checked by fixed rules: the type comes from
+  the person's verbs, the amount only from digits they wrote (then `parseDecimalAmount` in the
+  account's currency), dates from fixed expressions in their time zone, accounts by name among their
+  own; anything unclear becomes a clarification. Future intent is refused before the model runs.
+- **Never sent to the model:** password hashes, sessions, cookies, SMTP settings, receipt files or
+  document contents, e-mail addresses, internal identifiers, other users' data.
+- **Logging:** purpose, duration, prompt length, and problem codes only; never prompts, answers,
+  or tool results.
+
+### Resource controls and availability
+
+A limiter allows `OLLAMA_MAX_CONCURRENT_REQUESTS` at once with a short queue
+(`OLLAMA_MAX_QUEUED_REQUESTS`); beyond it requests fail fast as `busy`. Each request has a timeout,
+an output-token cap, and a prompt-size cap; unreadable JSON is retried once, then `invalid_output`.
+Model-backed endpoints are rate limited per user (`AI_MAX_REQUESTS_PER_USER` per
+`AI_RATE_WINDOW_MINUTES`). Availability is checked through `/api/tags` (cached 30 s) and reported by
+`GET /ai/status`: `disabled_by_server` (`AI_ENABLED=false`), `disabled_by_user` (Settings),
+`unreachable`, `model_missing`, `busy`, `timeout`, `invalid_output`. Disabled features return
+`403 AI_DISABLED`; an unavailable model returns `503 AI_UNAVAILABLE`, and a failed assistant turn
+stores nothing. Deterministic insights, history-based suggestions, and reports (with template
+wording) keep working without the model.
+
+**No background jobs.** AI requests are bounded, synchronous calls made while the person waits; the
+Phase 9 worker gained no AI job kinds, because nothing here needs to run unattended and queueing
+model work would hide failures behind delays.
+
+### API (`/api/v1`, session + CSRF, `no-store`)
+
+| Endpoint                                                              | Purpose                                       |
+| --------------------------------------------------------------------- | --------------------------------------------- |
+| `GET /ai/status` · `GET`/`PATCH /ai/preferences`                      | availability, model, the person's switch      |
+| `GET`/`POST`/`DELETE /ai/conversations`                               | list, start, delete all                       |
+| `GET`/`PATCH`/`DELETE /ai/conversations/:id`                          | read, rename, delete                          |
+| `POST /ai/conversations/:id/messages`                                 | ask (model, rate limited)                     |
+| `POST /ai/transaction-drafts`                                         | a draft from a sentence (model)               |
+| `POST /ai/category-suggestions` · `…/entry` · `…/reject`              | up to 10 at a time; history first, then model |
+| `GET /ai/merchant-suggestions` · `POST …/dismiss`                     | readable merchants (rules, patterns, model)   |
+| `GET`/`POST /ai/merchant-rules` · `DELETE /ai/merchant-rules/:id`     | the person's own name rules                   |
+| `POST /ai/search-interpretations`                                     | filters from a question (fixed rules + model) |
+| `POST /ai/reports` · `POST /ai/insight-explanations`                  | on-demand report; plain words for one insight |
+| `GET /insights` · `GET /insights/recurring-candidates`                | deterministic insights (no model)             |
+| `POST /insights/:key/dismiss` · `…/recurring-candidates/:key/dismiss` | hide one                                      |
+
+### Model choice
+
+The default is **`qwen3:1.7b`** (Apache-2.0, about 1.4 GB), which runs on a CPU-only laptop with
+8 GB of RAM; on 16 GB, `qwen3:4b-instruct` answers noticeably better. Any Ollama chat model with
+JSON-schema output works through `OLLAMA_MODEL`. Small models make mistakes (a wrong type, an
+invented amount, a misread search phrase); the fixed checks above exist so that those mistakes
+become clarifications or template wording, never wrong figures or wrong records.
+
+### Known limitations
+
+- Answers cover the person's own records only; no investment, tax, or legal advice, no market data.
+- Planning quality depends on the model: a small model may pick a less useful tool or ask for
+  clarification more often. Insights are rule-based and say what changed, never why; an unusually
+  large expense is not a fraud signal.
+- Merchant grouping keys use Latin letters; payees written only in other scripts are not grouped.
+- No vector search or embeddings; conversation context is the last few turns, bounded in size.
+- Conversations are kept until the person deletes them (one at a time, or all in Settings).
+- Vercel Functions cannot reach an Ollama on a private network; see
+  [vercel-deployment.md](./vercel-deployment.md#ai-features) for running AI there.

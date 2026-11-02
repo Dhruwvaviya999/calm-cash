@@ -10,6 +10,7 @@ Everything needed to set up, run, test, and troubleshoot CalmCash locally.
 | pnpm                    | **11.x**                          | `corepack enable` uses the version pinned in `package.json` (`packageManager`). |
 | Docker + Docker Compose | Docker Engine 24+ with Compose v2 | Docker Desktop on Windows/macOS. For the local database and e-mail catcher.     |
 | Git                     | any recent version                |                                                                                 |
+| Ollama (optional)       | 0.5 or later                      | Local model for the AI assistant (§4a). CalmCash works without it.              |
 
 PostgreSQL itself does **not** need to be installed — it runs in a container. A `psql` client is
 optional (you can use the one inside the container, see §4). If you prefer an existing PostgreSQL
@@ -155,6 +156,37 @@ docker compose down --volumes
 Prisma 7 does not regenerate the client automatically after migrations. Run `pnpm db:generate`
 after changing `schema.prisma` (`pnpm install` also runs it).
 
+## 4a. Local AI with Ollama (optional)
+
+The assistant, transaction drafts, smart search, assistant suggestions, and plain-word explanations
+use a model served by [Ollama](https://ollama.com) on your own machine. The API calls it over HTTP;
+the browser never does, and no financial data goes to a hosted AI service (the API refuses an
+`OLLAMA_BASE_URL` that is not loopback, private, a single-label host, or `*.local`/`*.internal`).
+Without Ollama everything else works, insights and reports included, and AI features say they are
+unavailable.
+
+```bash
+# Windows: winget install Ollama.Ollama · macOS: brew install ollama · Linux: see ollama.com/download
+ollama pull qwen3:1.7b        # default model: about 1.4 GB, Apache-2.0 licence
+ollama list                   # the model should be listed
+curl http://127.0.0.1:11434/api/tags
+```
+
+Ollama listens on `http://127.0.0.1:11434`, which is the default `OLLAMA_BASE_URL`; no `.env` change
+is needed. To use another model, set `OLLAMA_MODEL` (for example `qwen3:4b-instruct` on a machine
+with 16 GB of RAM) and pull it first; check the model's licence before choosing it. The other
+`OLLAMA_*`/`AI_*` variables in `.env.example` bound timeouts, concurrency, prompt size, and per-user
+request rates. `AI_ENABLED=false` switches every AI feature off for the installation; each person can
+also switch them off in Settings → AI & privacy.
+
+On a CPU-only laptop a small model takes about 10 seconds to load and then answers in 5–40 seconds;
+the defaults (120 s timeout, one request at a time, a queue of four) are set for that.
+
+**Real-model smoke test.** `pnpm test:ai-smoke` checks the running model through the real Ollama
+provider with made-up records only (no database): reachability, a transaction draft, a search
+interpretation, and grounded wording. It is never part of `pnpm test` or CI, and it fails clearly
+when Ollama is not running or the model is not pulled.
+
 ## 5. Testing
 
 Tests use [Vitest](https://vitest.dev) in every package and
@@ -216,6 +248,20 @@ unreadable jobs, retries, expiry, ambiguous and permanent e-mail failures, prefe
 verification suppression, and log privacy. `apps/worker` has unit tests for its health endpoint and
 worker names.
 
+**AI and insights tests (Phase 10).** Unit tests cover the Ollama provider against a mocked
+`fetch` (request shape, model missing, unreachable, timeout, unreadable replies, busy queue, status
+caching, no prompt in logs), structured output and retries, prompt fencing, the grounding check,
+dates in words, drafts (verbs and digits over the model, decimals per currency, future intent),
+search interpretation, merchant rules, and the pattern rules behind insights and repeating payments.
+API integration tests use a scripted fake model (`src/testing/fake-ai-provider.ts`): answers built
+from the person's own records, template fallback for invented numbers, allowlisted tools only,
+prompt injection in descriptions, cross-user isolation, drafts that never write, suggestions that
+apply only on accept, AI switched off (per person and per installation), unavailable or busy
+models, per-user rate limits, reports per currency, insights, and repeating-payment candidates. Web
+tests cover the assistant page, answer blocks and links, Settings → AI & privacy, the filled-in
+entry form, category suggestions, plain-word search chips, and the insights page. No test calls a
+real model or an external service.
+
 **Before pushing**, run the same gates CI should run:
 
 ```bash
@@ -262,6 +308,16 @@ Start Docker Desktop (or the Docker service) and wait until it reports that it i
 **The API exits with `Invalid environment configuration`**
 The message lists each offending variable by name (values are never printed). Make sure
 `.env` exists in the repository root and compare it with `.env.example`.
+
+**The assistant says the local AI service is not running, or the model is not installed**
+Start Ollama (`ollama serve`, or the Ollama app) and check `curl http://127.0.0.1:11434/api/tags`.
+If the model is missing, run `ollama pull <OLLAMA_MODEL>`. Status is re-checked every 30 seconds,
+so the assistant becomes available shortly after Ollama starts.
+
+**Assistant answers are slow, "busy", or time out**
+Small CPU-only models are slow, and only `OLLAMA_MAX_CONCURRENT_REQUESTS` run at once. Keep one
+request at a time on a laptop, close other heavy programs, or try a smaller model. A timed-out turn
+stores nothing; ask again.
 
 **`SMTP_HOST: With EMAIL_DELIVERY_MODE=mailpit only the local Mailpit is allowed`** (API or worker)
 Your `.env` points at a real mail server (for example Gmail) while `NODE_ENV` is not `production`.

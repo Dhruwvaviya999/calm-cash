@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { aiEnvFields, checkAiEnv, toAiConfig, type AiConfig } from './ai-env';
 import {
   checkEmailEnv,
   emailEnvFields,
@@ -8,6 +9,7 @@ import {
   type EmailConfig,
 } from './email-env';
 
+export type { AiConfig } from './ai-env';
 export type { EmailConfig, EmailDeliveryMode, SmtpConfig } from './email-env';
 
 export const NODE_ENVIRONMENTS = ['development', 'test', 'production'] as const;
@@ -48,6 +50,8 @@ export interface AppConfig {
   receiptStorageProvider: 'local' | 'vercel-blob';
   /** Server-only credential; never included in response DTOs or logs. */
   blobReadWriteToken: string | undefined;
+  /** Local AI (Ollama) settings. */
+  ai: AiConfig;
 }
 
 const DEVELOPMENT_SESSION_COOKIE = 'calmcash_session';
@@ -104,6 +108,7 @@ const envSchema = z
       .max(90 * 24)
       .default(72),
     ...emailEnvFields,
+    ...aiEnvFields,
     RECEIPT_STORAGE_DIR: optionalString,
     RECEIPT_STORAGE_PROVIDER: z.enum(['local', 'vercel-blob']).default('local'),
     BLOB_READ_WRITE_TOKEN: optionalString,
@@ -128,6 +133,7 @@ const envSchema = z
       });
     }
     checkEmailEnv(env, context);
+    checkAiEnv(env, context);
 
     if (env.RECEIPT_STORAGE_PROVIDER === 'vercel-blob' && env.BLOB_READ_WRITE_TOKEN === undefined) {
       context.addIssue({
@@ -223,6 +229,7 @@ export function parseEnv(source: Readonly<Record<string, string | undefined>>): 
       receiptStorageDir: env.RECEIPT_STORAGE_DIR ?? DEFAULT_RECEIPT_STORAGE_DIR,
       receiptStorageProvider: env.RECEIPT_STORAGE_PROVIDER,
       blobReadWriteToken: env.BLOB_READ_WRITE_TOKEN,
+      ai: toAiConfig(env),
     },
   };
 }

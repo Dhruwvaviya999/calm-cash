@@ -10,6 +10,7 @@ import {
   ProfileSettings,
   ResetDisplayPreferences,
 } from '@/features/settings';
+import { AiPrivacySettings } from '@/features/ai';
 import { NotificationPreferences } from '@/features/notifications';
 import { SystemStatusCard } from '@/features/system-status';
 
@@ -51,7 +52,7 @@ export default function SettingsPage(): ReactNode {
     <PageContainer>
       <PageHeader
         title="Settings"
-        description="Your profile, how you sign in, notifications, and how CalmCash looks on this device."
+        description="Your profile, how you sign in, notifications, AI features, and how CalmCash looks on this device."
       />
 
       <div className="flex flex-col gap-8">
@@ -86,6 +87,15 @@ export default function SettingsPage(): ReactNode {
           description="Choose which alerts and reminders you get, in the app and by e-mail, and how far ahead. Notifications only describe your money; they never record or move it."
         >
           <NotificationPreferences />
+        </SettingsSection>
+
+        <SettingsSection
+          id="ai-heading"
+          anchor="ai"
+          title="AI & privacy"
+          description="The assistant runs on a local model on the CalmCash server. Choose whether to use it, see what it is shown, and delete what it keeps."
+        >
+          <AiPrivacySettings />
         </SettingsSection>
 
         <SettingsSection

@@ -92,6 +92,19 @@ describe('parseEnv', () => {
         receiptStorageDir: '.data/receipts',
         receiptStorageProvider: 'local',
         blobReadWriteToken: undefined,
+        ai: {
+          enabled: true,
+          baseUrl: 'http://127.0.0.1:11434',
+          model: 'qwen3:1.7b',
+          requestTimeoutMs: 120_000,
+          maxConcurrent: 1,
+          maxQueue: 4,
+          contextTokens: 4_096,
+          maxOutputTokens: 512,
+          maxPromptChars: 12_000,
+          disableThinking: true,
+          rateLimit: { limit: 30, windowMs: 600_000 },
+        },
       },
     });
   });

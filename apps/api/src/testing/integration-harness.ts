@@ -28,6 +28,9 @@ import {
   type ImportsRepository,
 } from '../modules/imports/imports.repository';
 import { createPrismaNotificationsRepository } from '../modules/notifications';
+import { createPrismaAiRepository } from '../modules/ai/ai.repository';
+import { createPrismaInsightsRepository } from '../modules/insights/insights.repository';
+import { createFakeAiProvider, type FakeAiProvider } from './fake-ai-provider';
 import { createPrismaReceiptsRepository } from '../modules/receipts/receipts.repository';
 import type { FileStorage } from '../lib/file-storage';
 import { createInMemoryFileStorage, type InMemoryFileStorage } from './in-memory-storage';
@@ -86,6 +89,8 @@ export interface TestContext {
   email: InMemoryEmailService;
   clock: TestClock;
   tasks: BackgroundTasks;
+  /** The scripted local model of this app. */
+  ai: FakeAiProvider;
 }
 
 export interface TestContextOptions {
@@ -100,6 +105,8 @@ export interface TestContextOptions {
   importsRepository?: (real: ImportsRepository) => ImportsRepository;
   /** Wraps the in-memory receipt storage, e.g. to make removals fail. */
   receiptStorage?: (real: InMemoryFileStorage) => FileStorage;
+  /** AI settings of this app (defaults: enabled, effectively unlimited). */
+  ai?: { enabled?: boolean; rateLimit?: { limit: number; windowMs: number } };
 }
 
 /**
@@ -132,6 +139,7 @@ export function useIntegrationDatabase(): {
       const tasks = createBackgroundTasks(logger);
       const repository = createPrismaAuthRepository(prisma);
       const storage = createInMemoryFileStorage();
+      const ai = createFakeAiProvider();
       const app = createApp({
         config: { ...TEST_APP_CONFIG, jsonBodyLimit: '10kb' },
         logger,
@@ -187,8 +195,18 @@ export function useIntegrationDatabase(): {
           repository: createPrismaNotificationsRepository(prisma),
           now: clock.now,
         },
+        ai: {
+          repository: createPrismaAiRepository(prisma),
+          provider: ai,
+          config: {
+            enabled: options.ai?.enabled ?? true,
+            rateLimit: options.ai?.rateLimit ?? { limit: 10_000, windowMs: 60_000 },
+          },
+          now: clock.now,
+        },
+        insights: { repository: createPrismaInsightsRepository(prisma) },
       });
-      return { app, prisma, repository, email, clock, tasks, storage };
+      return { app, prisma, repository, email, clock, tasks, storage, ai };
     },
   };
 }

@@ -853,6 +853,43 @@ Notifications 400 days; finished deliveries 90 days; finished jobs 30 days; hear
 a worker was last seen. Failed rows are kept (with their error code) until then, for diagnosis and
 `requeue-failed`.
 
+## 3h. AI assistant (Phase 10)
+
+Migration `20261031090000_ai_assistant` adds five tables, all owned by one user and deleted with
+them (`ON DELETE CASCADE`). None of them holds money: deterministic insights are computed on request
+from the ledger and never stored, and nothing here can change a transaction. Rules are in
+[architecture.md §19](./architecture.md#19-ai-assistant-and-insights-phase-10).
+
+### `ai_preferences` (one row per user, optional)
+
+`user_id` is the primary key; `enabled` (default `true`). **No row means enabled**, so existing users
+needed no backfill. The operator's `AI_ENABLED=false` overrides it.
+
+### `ai_conversations` and `ai_messages`
+
+A conversation has a `title` (1–80 characters, CHECK not blank) and `updated_at`, indexed
+`(user_id, updated_at DESC)` for the list. Each message stores `role` (`user` | `assistant`, enum
+`ai_message_role`), `content` (≤ 4,000 characters), `blocks` (JSONB, CHECK an array: the
+server-built figures, transaction references, links, notices, and drafts shown with an answer;
+re-validated against the shared schema on every read), `follow_ups` (≤ 3, ≤ 160 characters each),
+and, for assistant messages only (CHECK), `outcome` (`answered` | `clarification` | `unsupported`)
+and `narrative` (`assistant` | `template`). `user_id` is denormalised on messages so every query
+filters by owner. A turn the model could not run is not stored. Conversations stay until the person
+deletes them; there is no automatic expiry.
+
+### `ai_merchant_rules`
+
+The person's own "always call this payee X" rules: `pattern_key` (a description key: lower-case
+letters, digits, and spaces only, CHECK) → `merchant` (CHECK not blank), unique per
+`(user_id, pattern_key)`. Applied only as suggestions; descriptions are never rewritten.
+
+### `ai_dismissals`
+
+Suggestions the person declined: `kind` (`category` | `merchant` | `recurring_candidate` |
+`insight`, CHECK), `subject_key` (a transaction id or a deterministic insight/candidate key, CHECK
+format), and `value` (e.g. the rejected category id; empty otherwise), unique per
+`(user_id, kind, subject_key, value)`, so dismissing twice is harmless.
+
 ## 4. Integrity rules
 
 ### Constraints

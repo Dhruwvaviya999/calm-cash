@@ -15,6 +15,9 @@ import { createPrismaDashboardRepository } from './modules/dashboard/dashboard.r
 import { createPrismaGoalsRepository } from './modules/goals/goals.repository';
 import { createPrismaImportsRepository } from './modules/imports/imports.repository';
 import { createPrismaNotificationsRepository } from './modules/notifications';
+import { createPrismaAiRepository } from './modules/ai/ai.repository';
+import { createOllamaProvider } from './modules/ai/provider/ollama-provider';
+import { createPrismaInsightsRepository } from './modules/insights/insights.repository';
 import { createPrismaReceiptsRepository } from './modules/receipts/receipts.repository';
 import { createLocalFileStorage } from './lib/file-storage';
 import { createVercelBlobFileStorage } from './lib/vercel-blob-storage';
@@ -75,6 +78,12 @@ const app = createApp({
         : createLocalFileStorage(config.receiptStorageDir),
   },
   notifications: { repository: createPrismaNotificationsRepository(prisma) },
+  ai: {
+    repository: createPrismaAiRepository(prisma),
+    provider: createOllamaProvider({ config: config.ai, logger }),
+    config: config.ai,
+  },
+  insights: { repository: createPrismaInsightsRepository(prisma) },
 });
 
 const stopSessionCleanup = scheduleSessionCleanup({

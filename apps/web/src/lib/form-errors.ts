@@ -62,6 +62,10 @@ export function describeRequestError(error: unknown): string {
         return 'Something went wrong on our side. Please try again in a moment.';
       case 'VALIDATION_ERROR':
         return 'Some details need your attention.';
+      // For AI_DISABLED / AI_UNAVAILABLE the API explains why the assistant cannot help right now
+      // (switched off, not running, busy, or slow); everything that does not need it still works.
+      case 'AI_DISABLED':
+      case 'AI_UNAVAILABLE':
       case 'BAD_REQUEST':
       case 'CONFLICT':
       case 'CSRF_TOKEN_INVALID':

@@ -36,10 +36,16 @@ import {
   scheduleToFormValues,
   timingOf,
   type ScheduleFormField,
+  type ScheduleFormValues,
 } from '../schedule-form-model';
 
 export type ScheduleFormMode =
-  | { kind: 'create'; variant: 'schedule' | 'subscription' }
+  | {
+      kind: 'create';
+      variant: 'schedule' | 'subscription';
+      /** Values to start from, e.g. a repeating payment CalmCash noticed; all stay editable. */
+      initial?: Partial<ScheduleFormValues> | undefined;
+    }
   | { kind: 'edit'; item: RecurringScheduleItemDto };
 
 export interface ScheduleFormProps {
@@ -75,7 +81,10 @@ export function ScheduleForm({
     mode.kind === 'edit' ? mode.item.schedule.isSubscription : mode.variant === 'subscription';
   const form = useFormFields(
     editing === undefined
-      ? emptyScheduleFormValues(defaultCurrency, timeZone)
+      ? {
+          ...emptyScheduleFormValues(defaultCurrency, timeZone),
+          ...(mode.kind === 'create' ? mode.initial : undefined),
+        }
       : scheduleToFormValues(editing.schedule),
   );
   const [submitting, setSubmitting] = useState(false);

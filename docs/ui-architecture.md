@@ -197,8 +197,9 @@ still prerenders).
 | `/imports`         | **Live data** (§7e). Upload a CSV statement, import history; `?batch=<id>&step=map\|review\|reconcile` resumes one import.                                                    |
 | `/budgets`         | **Live data** (§7d). Budgets & planning: `?section=budgets` (default), `recurring`, `subscriptions`, `goals`.                                                                 |
 | `/accounts`        | **Live data.** Totals per currency (held vs. owed), accounts grouped by classification, active/archived filter, add/edit sheet, details sheet, archive and restore.           |
-| `/insights`        | Upcoming-feature state and what to expect (no generated insights).                                                                                                            |
-| `/settings`        | Profile (name, currency, time zone), password change, signed-in devices, theme, preference reset, diagnostics.                                                                |
+| `/insights`        | **Live data** (§7g). Spending patterns (with period in the URL), possible bills and subscriptions, category and merchant suggestions, and reports.                            |
+| `/assistant`       | **Live data** (§7g). The financial assistant; `?c=<id>` opens a conversation.                                                                                                 |
+| `/settings`        | Profile (name, currency, time zone), password change, signed-in devices, notifications, AI & privacy (`#ai`), theme, preference reset, diagnostics.                           |
 | `/login`           | Sign in; notices after sign-out or an ended session; resend link for unconfirmed addresses.                                                                                   |
 | `/register`        | Create an account with live password guidance; ends on a "check your inbox" confirmation.                                                                                     |
 | `/forgot-password` | Request a reset link; the confirmation never reveals whether an account exists.                                                                                               |
@@ -426,6 +427,44 @@ the `(auth)` pages are public, and `/login` and `/register` send signed-in users
   "In the app" and "By e-mail" checkboxes and a sentence on what it covers, the income opt-in, lead
   times (1, 3, or 7 days) for bills and subscriptions, and Save / Discard with success and error
   messages.
+
+## 7g. Assistant and insights (Phase 10)
+
+- **Availability.** `features/ai/use-ai-status` asks `GET /ai/status` once per half minute for every
+  AI feature on the page (Settings clears it at once). While AI is unavailable or switched off, AI
+  controls are hidden (Describe it, plain-word search, Explain) or disabled with the API's reason
+  (the assistant's question box); deterministic insights, history-based suggestions, and reports
+  stay. The browser only ever calls the CalmCash API; it never reaches Ollama.
+- **Assistant** (`/assistant`, Overview navigation, mobile "More"): conversation list in a sidebar on
+  large screens and a left sheet on phones (new, open, rename inline, delete with confirmation);
+  suggested questions in an empty conversation; a thread (`role="log"`, polite live region) of the
+  person's questions and answers; follow-up chips under the latest answer; a sticky question box
+  above the bottom bar (Enter sends, Shift+Enter adds a line; the text is kept if sending fails). The
+  first question creates the conversation and puts it in the URL.
+- **Answer blocks** (`features/ai/components/assistant-blocks`): figures with `FinancialAmount` and
+  their currency and period; matching transactions linking to `/transactions?transaction=<id>`;
+  category shares with a bar (decorative) and the exact amount; notices; related-page links built by
+  `assistantHref` from the API's validated targets (the pages' own URLs only); and drafts. A note
+  says the figures come from the person's records; template wording is labelled as such.
+- **Drafts.** "Review and save" opens the ordinary `TransactionEntrySheet` with
+  `{ kind: 'create', prefill }`; the form shows "Filled in from your words", the assistant's question
+  and notes, and every field stays editable. Only Save records anything (the usual idempotency key).
+  The same form offers **Describe it** (a group, not a nested form; Enter fills in the form) while
+  adding, and **Suggest a category** under the category field (applied only on "Use …").
+- **Plain-word search** (transactions page): "Search in plain words" opens a small panel; the API's
+  interpretation is shown as chips to remove before "Apply filters", which sets the list's ordinary
+  URL filters (then editable in the filter sheet as usual). Names it could not match are listed.
+- **Insights** (`/insights`): period controls shared with the dashboard (`?period=`, `?from=&to=`,
+  `?currency=`); insight cards with kind badge, exact figures, a link to the matching records,
+  Explain (assistant wording, labelled) and Hide; possible bills and subscriptions with their
+  evidence, "Set up as a bill" / "Track as subscription" (the ordinary `ScheduleForm` in a sheet,
+  pre-filled through `mode.initial`) and "Not recurring"; Tidy up: up to 10 uncategorised recent
+  transactions with "Suggest categories", Accept / Not this / Accept all (each an ordinary edit), and
+  merchant suggestions loaded only on request with an editable name, "Use this name", "Always use
+  this name" (saves a rule), and Dismiss; Reports: choose a kind, create, print.
+- **Settings → AI & privacy** (`#ai`): status, model, last answer, the "Use AI features" switch
+  (disabled when the installation has AI off), what the model sees and never sees, delete all
+  conversations (confirmed), and the person's merchant rules with delete.
 
 ## 8. Prototype data rules
 

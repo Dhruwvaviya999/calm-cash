@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit && pnpm --recursive typecheck",
     "test": "pnpm --recursive test",
     "test:integration": "pnpm --filter @calmcash/api test:integration",
+    "test:ai-smoke": "pnpm --filter @calmcash/api test:ai-smoke",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "db:up": "docker compose up --detach --wait postgres",

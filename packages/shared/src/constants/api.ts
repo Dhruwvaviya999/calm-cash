@@ -38,6 +38,10 @@ export const ERROR_CODES = [
   'CSRF_TOKEN_INVALID',
   'ORIGIN_NOT_ALLOWED',
   'EMAIL_DELIVERY_FAILED',
+  // AI features (Phase 10): turned off (by the operator or the person), or the local model cannot
+  // answer right now. Every other feature keeps working.
+  'AI_DISABLED',
+  'AI_UNAVAILABLE',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
