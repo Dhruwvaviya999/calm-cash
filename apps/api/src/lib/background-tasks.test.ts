@@ -1,7 +1,10 @@
+import { waitUntil } from '@vercel/functions';
 import { pino } from 'pino';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createBackgroundTasks } from './background-tasks';
+
+vi.mock('@vercel/functions', () => ({ waitUntil: vi.fn() }));
 
 describe('background tasks', () => {
   it('run after the caller returns and can be drained', async () => {
@@ -16,6 +19,7 @@ describe('background tasks', () => {
     await tasks.drain();
 
     expect(order).toEqual(['caller', 'task']);
+    expect(waitUntil).toHaveBeenCalledWith(expect.any(Promise));
   });
 
   it('contain failures so they cannot crash the process', async () => {

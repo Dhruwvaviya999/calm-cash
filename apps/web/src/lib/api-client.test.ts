@@ -34,6 +34,21 @@ async function captureError(promise: Promise<unknown>): Promise<ApiClientError> 
 }
 
 describe('createApiClient', () => {
+  it('uses the shared public /api/v1 route for requests and downloads with no API origin', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ success: true, data: HEALTH }))
+      .mockResolvedValueOnce(new Response(new Uint8Array([137, 80, 78, 71])));
+    const client = createApiClient({ baseUrl: '', fetch: fetchMock });
+
+    await client.request('/health', { schema: healthCheckDtoSchema });
+    await client.download('/transactions/t/receipts/r/file');
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/health');
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/v1/transactions/t/receipts/r/file');
+    expect(fetchMock.mock.calls[1]?.[1]?.credentials).toBe('include');
+  });
+
   it('calls the versioned endpoint and returns the validated payload', async () => {
     const { client, fetchMock } = clientReturning(jsonResponse({ success: true, data: HEALTH }));
 

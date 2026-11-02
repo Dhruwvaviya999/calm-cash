@@ -53,7 +53,7 @@ export function contentDisposition(kind: 'attachment' | 'inline', fileName: stri
  * always downloaded as attachments; images may be shown inline (`?disposition=inline`).
  *
  * GET    /                       receipts (metadata only)
- * POST   /?fileName=             upload one receipt as the raw body (≤ 10 MB)
+ * POST   /?fileName=             upload one receipt as the raw body (≤ 4 MB)
  * GET    /:receiptId/file        the file
  * DELETE /:receiptId             remove the receipt (the transaction is untouched)
  */

@@ -208,7 +208,7 @@ describe('receipts', () => {
     ).expect(400);
     await upload(user, transactionId, RECEIPT_SAMPLES.png.subarray(0, 30), 'cut.png').expect(400);
     await upload(user, transactionId, new Uint8Array(), 'empty.png').expect(400);
-    await upload(user, transactionId, new Uint8Array(10 * 1024 * 1024 + 1), 'huge.png').expect(413);
+    await upload(user, transactionId, new Uint8Array(4 * 1024 * 1024 + 1), 'huge.png').expect(413);
     expect(context.storage.keys()).toHaveLength(0);
   });
 

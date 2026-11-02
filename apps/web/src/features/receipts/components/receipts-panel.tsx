@@ -67,7 +67,7 @@ function saveFile(blob: Blob, fileName: string): void {
 }
 
 /**
- * Receipts attached to one transaction: attach (JPEG, PNG, WebP, or PDF up to 10 MB), preview
+ * Receipts attached to one transaction: attach (JPEG, PNG, WebP, or PDF up to 4 MB), preview
  * images, save any file, and remove. Files are fetched only through the authorised API; receipts
  * never change the transaction or any balance.
  */
@@ -99,7 +99,7 @@ export function ReceiptsPanel({
     if (file.size > MAX_RECEIPT_BYTES) {
       setNotice({
         tone: 'error',
-        message: `${file.name} is ${formatBytes(file.size)}. Receipts can be at most 10 MB.`,
+        message: `${file.name} is ${formatBytes(file.size)}. Receipts can be at most 4 MB.`,
       });
       return;
     }
@@ -179,7 +179,7 @@ export function ReceiptsPanel({
         description={
           readOnly
             ? 'Read-only while the account is archived.'
-            : 'JPEG, PNG, WebP, or PDF, up to 10 MB each.'
+            : 'JPEG, PNG, WebP, or PDF, up to 4 MB each.'
         }
         action={
           readOnly ? undefined : (

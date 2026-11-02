@@ -386,7 +386,7 @@ the `(auth)` pages are public, and `/login` and `/register` send signed-in users
   that states the amount, date, and account. "Finish import" and "Cancel import" ask first; cancel
   says imported transactions stay.
 - **Receipts.** The transaction details sheet has a Receipts section: "Attach" (JPEG, PNG, WebP,
-  or PDF up to 10 MB, checked for size before upload; the API's reason is shown when it refuses a
+  or PDF up to 4 MB, checked for size before upload; the API's reason is shown when it refuses a
   file), a list with name, type, size, and date, image previews fetched through the authorised API
   into a temporary object URL, "Save" for any file, and "Remove" behind a confirmation that says the
   transaction does not change. Receipts of transactions on archived accounts are read-only.

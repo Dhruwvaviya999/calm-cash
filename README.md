@@ -117,6 +117,8 @@ as **Connected**. The API health endpoints are
 
 ## Documentation
 
+- [Vercel deployment](docs/vercel-deployment.md) — services, public routing, worker daemon,
+  private receipt storage, environment settings, and release checks.
 - [Architecture](docs/architecture.md) — boundaries, communication, module layout, error handling,
   configuration, technology decisions.
 - [UI architecture](docs/ui-architecture.md) — visual identity, design tokens, the responsive

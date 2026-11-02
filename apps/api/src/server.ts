@@ -20,6 +20,7 @@ import { createOllamaProvider } from './modules/ai/provider/ollama-provider';
 import { createPrismaInsightsRepository } from './modules/insights/insights.repository';
 import { createPrismaReceiptsRepository } from './modules/receipts/receipts.repository';
 import { createLocalFileStorage } from './lib/file-storage';
+import { createVercelBlobFileStorage } from './lib/vercel-blob-storage';
 import { createPrismaRecurringRepository } from './modules/recurring';
 import { createPrismaTagsRepository } from './modules/tags/tags.repository';
 import { createPrismaTransactionsRepository } from './modules/transactions/transactions.repository';
@@ -71,7 +72,10 @@ const app = createApp({
   imports: { repository: createPrismaImportsRepository(prisma) },
   receipts: {
     repository: createPrismaReceiptsRepository(prisma),
-    storage: createLocalFileStorage(config.receiptStorageDir),
+    storage:
+      config.receiptStorageProvider === 'vercel-blob' && config.blobReadWriteToken !== undefined
+        ? createVercelBlobFileStorage(config.blobReadWriteToken)
+        : createLocalFileStorage(config.receiptStorageDir),
   },
   notifications: { repository: createPrismaNotificationsRepository(prisma) },
   ai: {

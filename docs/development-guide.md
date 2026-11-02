@@ -13,7 +13,10 @@ Everything needed to set up, run, test, and troubleshoot CalmCash locally.
 
 PostgreSQL itself does **not** need to be installed — it runs in a container. A `psql` client is
 optional (you can use the one inside the container, see §4). If you prefer an existing PostgreSQL
-server, point `DATABASE_URL` at it and skip the Docker steps.
+server, point `DATABASE_URL` at it and skip the database Docker steps. Neon is supported through
+the existing Prisma PostgreSQL adapter: use its pooled URL for `DATABASE_URL` and its direct URL
+for `DIRECT_URL`. See [Neon setup](vercel-deployment.md#neon-postgresql-and-prisma). Leave
+`DIRECT_URL` unset when using the local Docker database. Local email still uses Mailpit.
 
 Verify the tools:
 

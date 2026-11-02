@@ -137,8 +137,8 @@ export const RECEIPT_EXTENSIONS: Readonly<Record<ReceiptContentType, readonly st
   'application/pdf': ['pdf'],
 };
 
-/** Largest receipt accepted (bytes). */
-export const MAX_RECEIPT_BYTES = 10 * 1024 * 1024;
+/** Leaves headroom below Vercel Functions' 4.5 MB request/response payload limit. */
+export const MAX_RECEIPT_BYTES = 4 * 1024 * 1024;
 /** Most receipts one transaction may carry. */
 export const MAX_RECEIPTS_PER_TRANSACTION = 10;
 /** Longest original receipt file name kept. */

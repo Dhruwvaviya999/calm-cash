@@ -776,12 +776,12 @@ them as usual); cancelling does not remove them. The statement file itself is ne
 
 ### `transaction_receipts`
 
-| Column                 | Meaning                                                                                  |
-| ---------------------- | ---------------------------------------------------------------------------------------- |
-| `storage_key`          | 32 random hex characters (unique); the only name used in storage. Never sent to clients. |
-| `file_name`            | Display label (sanitised like statement names).                                          |
-| `content_type`         | Decided from the content's signature: JPEG, PNG, WebP, or PDF (CHECK).                   |
-| `size_bytes`, `sha256` | 1 byte to 10 MB (CHECK); hex digest of the stored bytes.                                 |
+| Column                 | Meaning                                                                                     |
+| ---------------------- | ------------------------------------------------------------------------------------------- |
+| `storage_key`          | 32 random hex characters (unique); the only name used in storage. Never sent to clients.    |
+| `file_name`            | Display label (sanitised like statement names).                                             |
+| `content_type`         | Decided from the content's signature: JPEG, PNG, WebP, or PDF (CHECK).                      |
+| `size_bytes`, `sha256` | 1 byte to 10 MB (historical CHECK; new uploads allow 4 MB); hex digest of the stored bytes. |
 
 At most 10 receipts per transaction, enforced under a lock on the transaction row. Receipts never
 change the transaction or any balance; receipts of transactions on archived accounts are

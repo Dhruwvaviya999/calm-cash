@@ -19,7 +19,13 @@ export default function setup(): void {
 
   execFileSync(process.execPath, [prismaCli, 'migrate', 'deploy'], {
     cwd: repositoryRoot,
-    env: { ...process.env, DATABASE_URL: testDatabaseUrl },
+    // Override every CLI URL source: an inherited Neon production direct URL must never win.
+    env: {
+      ...process.env,
+      DATABASE_URL: testDatabaseUrl,
+      DIRECT_URL: testDatabaseUrl,
+      DATABASE_URL_UNPOOLED: testDatabaseUrl,
+    },
     stdio: 'pipe',
   });
 }

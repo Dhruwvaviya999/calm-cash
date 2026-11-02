@@ -1,3 +1,5 @@
+import { waitUntil } from '@vercel/functions';
+
 import type { Logger } from './logger';
 
 /**
@@ -24,6 +26,8 @@ export function createBackgroundTasks(logger: Logger): BackgroundTasks {
           pending.delete(promise);
         });
       pending.add(promise);
+      // Registers with the current Vercel invocation; outside Vercel this is a no-op.
+      waitUntil(promise);
     },
 
     drain: async () => {

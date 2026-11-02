@@ -3,6 +3,9 @@ import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // Vercel Services routes browser requests to the API on this same origin. This also keeps
+  // `vercel dev` from baking a standalone localhost API URL from .env.local into the browser.
+  ...(process.env.VERCEL === '1' ? { env: { NEXT_PUBLIC_API_URL: '' } } : {}),
   // Dev-tools badge position. The bottom corners would cover the sidebar's collapse control
   // (bottom-left) or the mobile "More" tab (bottom-right); top-left only overlaps the logo link.
   devIndicators: { position: 'top-left' },

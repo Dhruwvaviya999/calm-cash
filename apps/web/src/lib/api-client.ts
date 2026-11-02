@@ -65,7 +65,7 @@ export interface ApiClient {
 }
 
 export interface ApiClientConfig {
-  /** API origin without a version prefix, e.g. `http://localhost:4000`. */
+  /** API origin without a version prefix; empty uses same-origin `/api/v1` routing. */
   baseUrl: string;
   /** Injectable for tests; defaults to the global `fetch`. */
   fetch?: typeof fetch;
