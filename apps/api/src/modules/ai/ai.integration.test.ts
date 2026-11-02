@@ -249,18 +249,16 @@ describe('assistant conversations', () => {
     const { user, bank } = await withMarchRecords(context);
     const conversation = await startConversation(user);
     const before = await prisma.transaction.count({ where: { userId: user.session.user.id } });
-    context.ai.reply(
-      { action: 'record_transaction', calls: [], question: null },
-      {
-        kind: 'record',
-        type: 'expense',
-        amount: '320',
-        description: 'Groceries',
-        counterparty: 'FreshMart',
-        account: 'HDFC',
-        category: 'groceries',
-      },
-    );
+    // A reported payment goes straight to the draft reader; the planner is not asked.
+    context.ai.reply({
+      kind: 'record',
+      type: 'expense',
+      amount: '320',
+      description: 'Groceries',
+      counterparty: 'FreshMart',
+      account: 'HDFC',
+      category: 'groceries',
+    });
 
     const { assistantMessage } = await ask(
       user,
@@ -268,6 +266,7 @@ describe('assistant conversations', () => {
       'Spent 320 at FreshMart yesterday from HDFC',
     );
 
+    expect(context.ai.requests.map((request) => request.purpose)).toEqual(['transaction_draft']);
     expect(assistantMessage.content).toContain('nothing has been recorded');
     expect(assistantMessage.blocks).toHaveLength(1);
     expect(assistantMessage.blocks).toMatchObject([

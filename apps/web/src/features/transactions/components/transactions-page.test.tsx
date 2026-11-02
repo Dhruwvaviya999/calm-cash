@@ -86,6 +86,19 @@ const receiptServices = vi.hoisted(() => ({
   removeReceipt: vi.fn(),
 }));
 vi.mock('@/services/receipts.service', () => receiptServices);
+// AI features stay hidden here (they have their own tests); no request leaves the test.
+vi.mock('@/services/ai.service', () => ({
+  getAiStatus: vi.fn(() =>
+    Promise.resolve({
+      available: false,
+      serverEnabled: true,
+      enabledForUser: true,
+      provider: 'ollama',
+      model: 'qwen3:1.7b',
+      problem: 'unreachable',
+    }),
+  ),
+}));
 
 // --- Data ----------------------------------------------------------------------------------------
 

@@ -219,14 +219,19 @@ export function createOllamaProvider({
     model: config.model,
     complete,
     status: async ({ refresh = false } = {}) => {
-      if (
-        !refresh &&
-        cached !== undefined &&
-        now().getTime() - cached.checkedAt.getTime() < STATUS_CACHE_MS
-      ) {
+      const fresh =
+        cached !== undefined && now().getTime() - cached.checkedAt.getTime() < STATUS_CACHE_MS;
+      // While the model is answering, the server is evidently up: on a CPU-only machine a probe
+      // could time out then, and must not turn "busy" into "unreachable".
+      const answering = limiter.active() > 0 && cached?.problem === undefined;
+      if (cached !== undefined && !refresh && (fresh || answering)) {
         return { ...cached, lastSuccessAt };
       }
-      cached = await checkStatus();
+      const checked = await checkStatus();
+      if (checked.problem === 'unreachable' && answering && cached !== undefined) {
+        return { ...cached, lastSuccessAt };
+      }
+      cached = checked;
       return cached;
     },
   };

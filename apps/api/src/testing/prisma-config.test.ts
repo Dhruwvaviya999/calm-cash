@@ -61,14 +61,20 @@ describe('Prisma CLI connection configuration', () => {
       expected: undefined,
     },
     { name: 'all blank URLs', direct: '', unpooled: ' ', runtime: '', expected: undefined },
-  ])('uses $name', async ({ direct, unpooled, runtime, expected }) => {
-    vi.stubEnv('DIRECT_URL', direct);
-    vi.stubEnv('DATABASE_URL_UNPOOLED', unpooled);
-    vi.stubEnv('DATABASE_URL', runtime);
+  ])(
+    'uses $name',
+    async ({ direct, unpooled, runtime, expected }) => {
+      vi.stubEnv('DIRECT_URL', direct);
+      vi.stubEnv('DATABASE_URL_UNPOOLED', unpooled);
+      vi.stubEnv('DATABASE_URL', runtime);
 
-    const { default: config } = await import('../../../../prisma.config');
-    expect(config.datasource?.url).toBe(expected);
-  });
+      const { default: config } = await import('../../../../prisma.config');
+      expect(config.datasource?.url).toBe(expected);
+    },
+    // The first import loads Prisma's config package cold, which can exceed the default 5 s
+    // while every workspace's tests run in parallel.
+    20_000,
+  );
 });
 
 it('forces integration migrations to the test database even when production Neon URLs are inherited', () => {

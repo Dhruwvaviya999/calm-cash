@@ -148,32 +148,37 @@ export function createPrismaAiRepository(prisma: PrismaClient): AiRepository {
       return rows.reverse();
     },
 
-    addMessages: (userId, conversationId, messages) =>
-      prisma.$transaction(async (tx) => {
-        const created: MessageRecord[] = [];
-        for (const message of messages) {
-          created.push(
-            await tx.aiMessage.create({
-              data: {
-                userId,
-                conversationId,
-                role: message.role,
-                content: message.content,
-                blocks: toInputJson(message.blocks),
-                followUps: message.followUps,
-                outcome: message.outcome ?? null,
-                narrative: message.narrative ?? null,
-              },
-            }),
-          );
-        }
+    addMessages: async (userId, conversationId, messages) => {
+      // A batch transaction: all-or-nothing like an interactive one, but without its 5 s limit,
+      // which a busy machine (the local model shares the CPU) can exceed after a long answer.
+      // Times increase by a millisecond per message so a turn always reads question → answer.
+      const now = Date.now();
+      const results = await prisma.$transaction([
+        ...messages.map((message, index) =>
+          prisma.aiMessage.create({
+            data: {
+              userId,
+              conversationId,
+              role: message.role,
+              content: message.content,
+              blocks: toInputJson(message.blocks),
+              followUps: message.followUps,
+              outcome: message.outcome ?? null,
+              narrative: message.narrative ?? null,
+              createdAt: new Date(now + index),
+            },
+          }),
+        ),
         // Touch the conversation so it sorts first.
-        await tx.aiConversation.updateMany({
+        prisma.aiConversation.updateMany({
           where: { id: conversationId, userId },
-          data: { updatedAt: new Date() },
-        });
-        return created;
-      }),
+          data: { updatedAt: new Date(now + messages.length) },
+        }),
+      ]);
+      return results
+        .slice(0, messages.length)
+        .flatMap((row): MessageRecord[] => ('role' in row ? [row] : []));
+    },
 
     categorizedExamples: async (userId, limit) => {
       const rows = await prisma.transaction.findMany({

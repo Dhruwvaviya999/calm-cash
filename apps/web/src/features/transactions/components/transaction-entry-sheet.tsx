@@ -98,7 +98,11 @@ export function TransactionEntrySheet({
           )}
           {mode !== undefined && mode.kind !== 'reconcile' && (
             <TransactionForm
-              key={mode.kind === 'edit' ? mode.item.transaction.id : `create-${mode.type}`}
+              key={
+                mode.kind === 'edit'
+                  ? mode.item.transaction.id
+                  : `create-${mode.type}-${mode.prefill === undefined ? 'blank' : 'draft'}`
+              }
               mode={mode}
               accounts={accounts.map((entry) => entry.account)}
               categories={categories}

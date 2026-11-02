@@ -6,6 +6,8 @@ import {
   type AccountDto,
   type CategoryDto,
   type CurrencyCode,
+  type DraftNoteDto,
+  type TransactionDraftDto,
   type TransactionListItemDto,
   type TransactionType,
 } from '@calmcash/shared';
@@ -34,6 +36,7 @@ import { createTransaction, updateTransaction } from '@/services/transactions.se
 import {
   buildCreateTransactionInput,
   buildUpdateTransactionInput,
+  draftToFormValues,
   emptyTransactionFormValues,
   isTransactionType,
   splitTags,
@@ -42,13 +45,36 @@ import {
   type TransactionFormField,
 } from '../transaction-form-model';
 import { CategorySelect } from './category-select';
+import { CategorySuggestion } from './category-suggestion';
+import { DescribeIt, type DraftResult } from './describe-it';
 import { TagInput } from './tag-input';
 
 /** Types recorded through this form; balance corrections use the reconciliation workflow. */
 export type EntryType = Exclude<TransactionType, 'balance_adjustment'>;
 
+/** A draft the assistant read from the person's own words: shown for review, never saved by itself. */
+export interface DraftPrefill {
+  draft: TransactionDraftDto;
+  notes: readonly DraftNoteDto[];
+  /** What the assistant still needs to know, when the words left something open. */
+  question?: string | undefined;
+}
+
+export function prefillFromDraft(result: DraftResult): DraftPrefill {
+  return {
+    draft: result.draft,
+    notes: result.notes,
+    ...(result.kind === 'clarification' ? { question: result.question } : {}),
+  };
+}
+
 export type TransactionFormMode =
-  | { kind: 'create'; type: EntryType; accountId?: string | undefined }
+  | {
+      kind: 'create';
+      type: EntryType;
+      accountId?: string | undefined;
+      prefill?: DraftPrefill | undefined;
+    }
   | { kind: 'edit'; item: TransactionListItemDto };
 
 export interface TransactionFormProps {
@@ -148,23 +174,42 @@ export function TransactionForm({
 }: TransactionFormProps): ReactNode {
   const editing = mode.kind === 'edit' ? mode.item : undefined;
   const active = accounts.filter((account) => account.status === 'active');
+  const onlyAccount = active.length === 1 ? active[0]?.id : undefined;
+  const valuesFromDraft = (draft: TransactionDraftDto): ReturnType<typeof draftToFormValues> => {
+    const values = draftToFormValues(draft, timeZone, new Date());
+    return values.accountId === '' && onlyAccount !== undefined
+      ? { ...values, accountId: onlyAccount }
+      : values;
+  };
   const [initial] = useState(() => {
     if (editing !== undefined) {
       return transactionToFormValues(editing.transaction, timeZone);
     }
+    if (mode.kind === 'create' && mode.prefill !== undefined) {
+      return valuesFromDraft(mode.prefill.draft);
+    }
     const preset = mode.kind === 'create' ? mode.accountId : undefined;
-    const only = active.length === 1 ? active[0]?.id : undefined;
     return emptyTransactionFormValues(
       mode.kind === 'create' ? mode.type : 'expense',
       timeZone,
       new Date(),
-      preset ?? only ?? '',
+      preset ?? onlyAccount ?? '',
     );
   });
   const form = useFormFields(initial);
   const [submitting, setSubmitting] = useState(false);
   const [failure, setFailure] = useState<string | undefined>();
   const [idempotencyKey] = useState(newIdempotencyKey);
+  const [prefill, setPrefill] = useState<DraftPrefill | undefined>(
+    mode.kind === 'create' ? mode.prefill : undefined,
+  );
+
+  /** Replaces what was typed with a fresh draft (only while adding, never while editing). */
+  const applyDraft = (result: DraftResult): void => {
+    setFailure(undefined);
+    form.reset(valuesFromDraft(result.draft));
+    setPrefill(prefillFromDraft(result));
+  };
 
   const type = isTransactionType(form.values.type) ? form.values.type : 'expense';
   const source = accounts.find((account) => account.id === form.values.accountId);
@@ -251,6 +296,21 @@ export function TransactionForm({
       onSubmit={(event) => void handleSubmit(event)}
       className="flex flex-col gap-5"
     >
+      {editing === undefined && !adjustment && <DescribeIt onDraft={applyDraft} />}
+      {prefill !== undefined && (
+        <FormMessage tone="info" title="Filled in from your words">
+          {prefill.question !== undefined && <p className="font-medium">{prefill.question}</p>}
+          <p>Check every field below. Nothing is recorded until you add it.</p>
+          {prefill.notes.length > 0 && (
+            <ul className="mt-1 flex list-disc flex-col gap-0.5 pl-5 text-muted-foreground">
+              {prefill.notes.map((note) => (
+                <li key={`${note.field}:${note.message}`}>{note.message}</li>
+              ))}
+            </ul>
+          )}
+        </FormMessage>
+      )}
+
       {adjustment ? (
         <FormMessage tone="info" title="Balance adjustment">
           A correction recorded to match the balance your bank or statement showed. It never counts
@@ -418,6 +478,15 @@ export function TransactionForm({
               />
             )}
           </FormField>
+          <CategorySuggestion
+            type={type}
+            description={form.values.description}
+            merchant={form.values.merchant}
+            categories={categories}
+            onUse={(categoryId) => {
+              setValue('categoryId', categoryId);
+            }}
+          />
         </>
       )}
 

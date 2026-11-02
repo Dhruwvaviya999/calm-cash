@@ -414,15 +414,21 @@ describe('PlanningPage › recurring', () => {
   });
 
   it('shows the month calendar with accessible day labels', async () => {
-    show('recurring');
-    renderWithAuth(<PlanningPage />);
-    const user = userEvent.setup();
-    await screen.findByRole('list', { name: 'Overdue payments' });
-    await user.click(screen.getByRole('radio', { name: 'Calendar' }));
-    const day = await screen.findByRole('button', {
-      name: /1 October 2026, 1 payment, 1 expected, 1 overdue/,
-    });
-    expect(day).toBeDefined();
+    // The calendar opens on the current month; the fixtures are from October 2026.
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-10-27T06:00:00.000Z') });
+    try {
+      show('recurring');
+      renderWithAuth(<PlanningPage />);
+      const user = userEvent.setup();
+      await screen.findByRole('list', { name: 'Overdue payments' });
+      await user.click(screen.getByRole('radio', { name: 'Calendar' }));
+      const day = await screen.findByRole('button', {
+        name: /1 October 2026, 1 payment, 1 expected, 1 overdue/,
+      });
+      expect(day).toBeDefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

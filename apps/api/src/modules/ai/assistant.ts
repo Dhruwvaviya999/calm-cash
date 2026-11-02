@@ -11,7 +11,7 @@ import { z } from 'zod';
 import { AppError } from '../../lib/app-error';
 import type { Caller } from '../../lib/auth-boundary';
 import type { CategorizedExample, MessageRecord, NewMessage } from './ai.repository';
-import { draftFromText } from './drafts';
+import { draftFromText, readsLikeRecord } from './drafts';
 import { isGrounded, sanitizeWording } from './grounding';
 import { narrate } from './narration';
 import { DATA_RULES, dataBlock, neutralize } from './prompting';
@@ -124,26 +124,7 @@ export async function answerQuestion(
 ): Promise<NewMessage> {
   const { caller } = context;
   const today = calendarDateInTimeZone(now, caller.timeZone);
-  let plan: Plan;
-  try {
-    plan = await generateStructured({
-      provider,
-      schema: planSchema,
-      purpose: 'assistant_plan',
-      maxOutputTokens: 300,
-      messages: [
-        { role: 'system', content: planPrompt(caller, today, context) },
-        { role: 'user', content: `${historyFor(history)}\nQuestion: ${question}` },
-      ],
-    });
-  } catch (error: unknown) {
-    if (error instanceof AiUnavailableError) {
-      return assistantMessage(AI_PROBLEM_MESSAGES[error.problem], [], 'unavailable', 'template');
-    }
-    throw error;
-  }
-
-  if (plan.action === 'record_transaction') {
+  const draftTurn = async (): Promise<NewMessage> => {
     try {
       const result = await draftFromText(provider, question, {
         caller,
@@ -167,7 +148,31 @@ export async function answerQuestion(
       }
       throw error;
     }
+  };
+
+  // Reported spending goes straight to a draft; everything else is planned by the model.
+  if (readsLikeRecord(question)) return draftTurn();
+
+  let plan: Plan;
+  try {
+    plan = await generateStructured({
+      provider,
+      schema: planSchema,
+      purpose: 'assistant_plan',
+      maxOutputTokens: 300,
+      messages: [
+        { role: 'system', content: planPrompt(caller, today, context) },
+        { role: 'user', content: `${historyFor(history)}\nQuestion: ${question}` },
+      ],
+    });
+  } catch (error: unknown) {
+    if (error instanceof AiUnavailableError) {
+      return assistantMessage(AI_PROBLEM_MESSAGES[error.problem], [], 'unavailable', 'template');
+    }
+    throw error;
   }
+
+  if (plan.action === 'record_transaction') return draftTurn();
 
   const calls = acceptedCalls(plan);
   if (plan.action === 'clarify' || (plan.action === 'use_tools' && calls.length === 0)) {

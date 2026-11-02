@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import { createFakeAiProvider } from '../../testing/fake-ai-provider';
 import { readDate, readMonthRange, readTime } from './date-expressions';
-import { amountInText, draftFromText, type DraftContext } from './drafts';
+import { amountInText, draftFromText, readsLikeRecord, type DraftContext } from './drafts';
 
 const USER = '00000000-0000-4000-8000-000000000001';
 const HDFC = '00000000-0000-4000-8000-0000000000a1';
@@ -118,6 +118,26 @@ describe('amountInText', () => {
     expect(amountInText('450.00', 'spent 450 rupees')).toBe('450');
     expect(amountInText('4500', 'spent 450 rupees')).toBeUndefined();
     expect(amountInText('lots', 'spent 450 rupees')).toBeUndefined();
+  });
+});
+
+describe('readsLikeRecord', () => {
+  it.each([
+    'Spent 450 on dinner at Swiggy yesterday from HDFC',
+    'Paid 1200 for electricity',
+    'got 85000 salary today',
+  ])('treats "%s" as a record', (text) => {
+    expect(readsLikeRecord(text)).toBe(true);
+  });
+
+  it.each([
+    'How much have I spent on food?',
+    'What did I pay to Swiggy last month',
+    'I spent a lot on food',
+    'I will pay rent of 15000 tomorrow',
+    'Compare what I spent in May with 2025',
+  ])('leaves "%s" to the planner', (text) => {
+    expect(readsLikeRecord(text)).toBe(false);
   });
 });
 
@@ -293,6 +313,20 @@ describe('draftFromText', () => {
     expect((await draftFromText(provider, 'What is my balance?', context())).kind).toBe(
       'not_a_transaction',
     );
+  });
+
+  it('reads the payee after "at" when the model names none', async () => {
+    const provider = createFakeAiProvider();
+    // Seen with a small local model: no counterparty and no description.
+    provider.reply({ kind: 'record', type: 'expense', amount: '450', account: 'HDFC' });
+
+    const result = await draftFromText(
+      provider,
+      'Spent 450 on dinner at Swiggy yesterday from HDFC',
+      context(),
+    );
+
+    expect(result.kind !== 'not_a_transaction' && result.draft.merchant).toBe('Swiggy');
   });
 
   it('turns unclear types into a question', async () => {

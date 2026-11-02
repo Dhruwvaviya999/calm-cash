@@ -14,5 +14,6 @@ export {
   isPendingOccurrence,
   OCCURRENCE_STATUS_PRESENTATION,
 } from './recurring-presentation';
+export { type ScheduleFormValues } from './schedule-form-model';
 export { useOccurrenceActions, type PlanningNotice } from './use-occurrence-actions';
 export { usePlanningReferences } from './use-planning-references';

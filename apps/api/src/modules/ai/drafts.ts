@@ -75,6 +75,25 @@ const VERBS = {
 const PAST_MONEY_VERBS =
   /\b(spent|paid|bought|purchased|ordered|charged|received|got|earned|credited|transferred|moved)\b/i;
 
+const QUESTION_START =
+  /^(how|what|when|where|which|who|why|did|do|does|am|is|are|was|were|can|could|should|show|list|tell|find|compare)\b/i;
+
+/**
+ * A sentence that reports money already moved ("Spent 450 on dinner yesterday"): a past-tense
+ * money verb and a number, and not a question. Such sentences go straight to a draft — a small
+ * model sometimes plans a lookup for them instead.
+ */
+export function readsLikeRecord(text: string): boolean {
+  const trimmed = text.trim();
+  return (
+    PAST_MONEY_VERBS.test(trimmed) &&
+    /\d/.test(trimmed) &&
+    !trimmed.endsWith('?') &&
+    !QUESTION_START.test(trimmed) &&
+    !FUTURE_INTENT.test(trimmed)
+  );
+}
+
 const PAYMENT_KEYWORDS: readonly [RegExp, PaymentMethod][] = [
   [/\bupi\b|\bgpay\b|\bphone ?pe\b|\bpaytm\b/i, 'upi'],
   [/\bcredit card\b/i, 'credit_card'],
@@ -127,6 +146,18 @@ function wordsInText(phrase: string | null | undefined, text: string): string | 
   return words.length > 0 && words.every((word) => lower.includes(word))
     ? neutralize(phrase, 120)
     : undefined;
+}
+
+/**
+ * "… at Swiggy …" → "Swiggy": a capitalised name right after "at", when the model named no payee.
+ * Account names are never taken as the payee.
+ */
+function payeeAfterAt(text: string, accounts: readonly AccountDto[]): string | undefined {
+  const name = /\bat\s+((?:[A-Z][\w&'.-]*)(?:\s+[A-Z][\w&'.-]*){0,3})/.exec(text)?.[1];
+  if (name === undefined) return undefined;
+  const lower = name.toLowerCase();
+  if (accounts.some((account) => account.name.toLowerCase() === lower)) return undefined;
+  return neutralize(name, 120);
 }
 
 function typeFromVerbs(text: string): 'income' | 'expense' | 'transfer' | undefined {
@@ -287,7 +318,8 @@ export async function draftFromText(
     notes.push({ field: 'date', message: 'No date was mentioned, so today is used. Check it.' });
   const time = readTime(text);
 
-  const counterparty = wordsInText(extracted.counterparty, text);
+  const counterparty =
+    wordsInText(extracted.counterparty, text) ?? payeeAfterAt(text, refs.accounts);
   let categoryId: string | undefined;
   if (type !== 'transfer') {
     const usable = refs.categories.filter(

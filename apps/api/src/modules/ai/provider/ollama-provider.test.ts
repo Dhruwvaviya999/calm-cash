@@ -229,6 +229,33 @@ describe('Ollama provider', () => {
     expect(calls.filter((call) => call.url.endsWith('/api/tags'))).toHaveLength(1);
   });
 
+  it('does not call a busy server unreachable while it is answering', async () => {
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let tagsCalls = 0;
+    const { provider } = setup(async (url) => {
+      if (url.endsWith('/api/tags')) {
+        tagsCalls += 1;
+        if (tagsCalls > 1) throw new TypeError('probe timed out');
+        return json({ models: [{ name: 'qwen3:1.7b' }] });
+      }
+      await gate;
+      return chat('{}');
+    });
+
+    expect((await provider.status()).problem).toBeUndefined();
+    const answer = provider.complete(REQUEST);
+    expect(await provider.status({ refresh: true })).toMatchObject({
+      reachable: true,
+      problem: undefined,
+    });
+    release?.();
+    await answer;
+    expect((await provider.status({ refresh: true })).problem).toBe('unreachable');
+  });
+
   it('reports a model that is not pulled and a server that is down', async () => {
     const missing = setup(() => Promise.resolve(json({ models: [{ name: 'llama3.2:latest' }] })));
     expect(await missing.provider.status()).toMatchObject({

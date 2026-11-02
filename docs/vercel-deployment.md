@@ -178,3 +178,13 @@ References: [Services](https://vercel.com/docs/services),
 [bindings](https://vercel.com/docs/services/bindings),
 [Daemons](https://vercel.com/docs/daemons),
 [private Blob storage](https://vercel.com/docs/vercel-blob/private-storage).
+
+## AI features
+
+The assistant uses a model served by Ollama, which the API may only reach on loopback or a private
+network (`OLLAMA_BASE_URL` validation refuses hosted endpoints, and there is no hosted fallback).
+Vercel Functions have neither, so on Vercel set **`AI_ENABLED=false`** for Production and Preview.
+The app then works as before: AI controls are hidden or explain that AI is off, while rule-based
+insights, repeating-payment suggestions, history-based category suggestions, and reports keep
+working. Running the assistant in production needs the API on a host that can reach a private
+Ollama server (for example a container next to it), with the `OLLAMA_*` limits in `.env.example`.

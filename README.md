@@ -3,16 +3,16 @@
 CalmCash is an AI-powered personal finance tracker. The roadmap covers transaction management,
 budgeting, bank statement imports, financial analytics, AI insights, and recurring payments.
 
-> **Status — Phase 9 (notifications, reminders, and background automation) complete.** On top of
-> Phases 1–8 (foundation, design system, authentication, accounts, transactions, dashboard,
-> budgets and planning, statement imports and receipts), a background worker (`apps/worker`) keeps
-> people informed: budget alerts at each budget's own thresholds, reminders before and on the due
-> date of recurring bills (and expected income, if chosen), one overdue reminder, subscription
-> renewal reminders, and a monthly summary per currency — in an in-app notification center and,
-> when someone opts in, by e-mail. Work is durable in PostgreSQL (claimed with `SKIP LOCKED`
-> leases, retried, never duplicated), and notifications never record or move money. Nothing new is
-> generated while no worker runs. E-mail is at least once, not exactly once; outside production it
-> can only reach the local Mailpit. Push, SMS, and browser notifications are not part of this phase.
+> **Status — Phase 10 (AI-powered financial intelligence) complete.** On top of Phases 1–9
+> (foundation through notifications and the background worker), CalmCash has a financial assistant
+> that answers questions about the person's own records, rule-based spending insights, possible
+> bills and subscriptions, category and merchant suggestions, transaction drafts from plain words,
+> plain-word search, and on-demand reports. The model runs locally through **Ollama** (default
+> `qwen3:1.7b`), reached only by the API; there is no hosted AI provider and no fallback to one. The
+> model never supplies figures or identifiers — it picks allowlisted read-only tools and words the
+> answer, every number comes from CalmCash's own services, and nothing is saved or changed until the
+> person confirms it in the ordinary forms. Without Ollama, everything except the AI features works,
+> including insights and reports.
 
 ## Tech stack
 
@@ -94,26 +94,27 @@ as **Connected**. The API health endpoints are
 
 ## Scripts
 
-| Script                  | Description                                                |
-| ----------------------- | ---------------------------------------------------------- |
-| `pnpm dev`              | Start the API, the web app, and the worker in watch mode.  |
-| `pnpm dev:worker`       | Start only the background worker (watch mode).             |
-| `pnpm worker:start`     | Run the built worker (production).                         |
-| `pnpm worker:status`    | Show job and e-mail queue counts and recent workers.       |
-| `pnpm build`            | Build the API and worker bundles and the Next.js build.    |
-| `pnpm lint`             | Lint the whole workspace (warnings fail).                  |
-| `pnpm typecheck`        | Type-check every package.                                  |
-| `pnpm test`             | Run all unit and component test suites (no database).      |
-| `pnpm test:integration` | Run the API integration tests against `TEST_DATABASE_URL`. |
-| `pnpm format`           | Format with Prettier.                                      |
-| `pnpm format:check`     | Check formatting.                                          |
-| `pnpm db:up`            | Start local PostgreSQL (Docker).                           |
-| `pnpm mail:up`          | Start Mailpit, the local e-mail catcher (Docker).          |
-| `pnpm db:down`          | Stop local services (data is kept).                        |
-| `pnpm db:generate`      | Generate the Prisma Client.                                |
-| `pnpm db:migrate`       | Create/apply migrations in development.                    |
-| `pnpm db:deploy`        | Apply pending migrations (CI/production).                  |
-| `pnpm db:studio`        | Open Prisma Studio.                                        |
+| Script                  | Description                                                   |
+| ----------------------- | ------------------------------------------------------------- |
+| `pnpm dev`              | Start the API, the web app, and the worker in watch mode.     |
+| `pnpm dev:worker`       | Start only the background worker (watch mode).                |
+| `pnpm worker:start`     | Run the built worker (production).                            |
+| `pnpm worker:status`    | Show job and e-mail queue counts and recent workers.          |
+| `pnpm build`            | Build the API and worker bundles and the Next.js build.       |
+| `pnpm lint`             | Lint the whole workspace (warnings fail).                     |
+| `pnpm typecheck`        | Type-check every package.                                     |
+| `pnpm test`             | Run all unit and component test suites (no database).         |
+| `pnpm test:integration` | Run the API integration tests against `TEST_DATABASE_URL`.    |
+| `pnpm test:ai-smoke`    | Optional: check the real local Ollama model (synthetic data). |
+| `pnpm format`           | Format with Prettier.                                         |
+| `pnpm format:check`     | Check formatting.                                             |
+| `pnpm db:up`            | Start local PostgreSQL (Docker).                              |
+| `pnpm mail:up`          | Start Mailpit, the local e-mail catcher (Docker).             |
+| `pnpm db:down`          | Stop local services (data is kept).                           |
+| `pnpm db:generate`      | Generate the Prisma Client.                                   |
+| `pnpm db:migrate`       | Create/apply migrations in development.                       |
+| `pnpm db:deploy`        | Apply pending migrations (CI/production).                     |
+| `pnpm db:studio`        | Open Prisma Studio.                                           |
 
 ## Documentation
 
