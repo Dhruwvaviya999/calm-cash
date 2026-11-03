@@ -1,3 +1,4 @@
+import { SpeedInsights } from '@vercel/speed-insights/next';
 import { GeistSans } from 'geist/font/sans';
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
@@ -36,6 +37,7 @@ export default function RootLayout({ children }: LayoutProps<'/'>): ReactNode {
         <PreferencesSync />
         {/* Session state for every route: restored from the API, never from browser storage. */}
         <AuthProvider>{children}</AuthProvider>
+        <SpeedInsights />
       </body>
     </html>
   );
