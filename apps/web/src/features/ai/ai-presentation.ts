@@ -77,6 +77,8 @@ export function assistantHref(target: AssistantLinkTarget): AppHref {
       return { pathname: '/budgets', query: { section: 'goals' } };
     case 'insights':
       return '/insights';
+    case 'scenarios':
+      return '/scenarios';
   }
 }
 
@@ -88,4 +90,5 @@ export const SUGGESTED_QUESTIONS = [
   'Which subscriptions cost me the most?',
   'What payments are coming up?',
   'How much did I spend on food last month?',
+  'How much might I have at the end of this month?',
 ] as const;

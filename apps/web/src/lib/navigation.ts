@@ -1,6 +1,7 @@
 import {
   ArrowLeftRight,
   Bot,
+  FlaskConical,
   FileUp,
   LayoutDashboard,
   PiggyBank,
@@ -21,6 +22,7 @@ export type NavItemId =
   | 'budgets'
   | 'accounts'
   | 'insights'
+  | 'scenarios'
   | 'assistant'
   | 'settings';
 export type NavGroupId = 'overview' | 'manage' | 'system';
@@ -68,6 +70,16 @@ export const NAV_ITEMS: readonly NavItem[] = [
     mobileLabel: 'Insights',
     description: 'Patterns and trends in your spending',
     icon: Sparkles,
+    group: 'overview',
+    mobilePlacement: 'more',
+  },
+  {
+    id: 'scenarios',
+    href: '/scenarios',
+    label: 'Scenarios',
+    mobileLabel: 'Scenarios',
+    description: 'Try a what-if without changing anything',
+    icon: FlaskConical,
     group: 'overview',
     mobilePlacement: 'more',
   },

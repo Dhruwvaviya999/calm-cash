@@ -17,8 +17,10 @@ import { scheduleValuesFromCandidate } from './insights-presentation';
 
 // --- Mocks ---------------------------------------------------------------------------------------
 
+// The open tab lives in the URL (`?tab=`); each test chooses one.
+const location = vi.hoisted(() => ({ search: '' }));
 vi.mock('next/navigation', () => ({
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(location.search),
   useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
   usePathname: () => '/insights',
 }));
@@ -42,6 +44,18 @@ const ai = vi.hoisted(() => ({
   createReport: vi.fn(),
 }));
 vi.mock('@/services/ai.service', () => ai);
+
+// The Phase 11 sections on the same tabs stay loading here; they have their own tests.
+const intelligence = vi.hoisted(() => {
+  const pending = (): Promise<never> => new Promise<never>(() => undefined);
+  return {
+    getSpendingPatterns: vi.fn(pending),
+    getIntelligenceOverview: vi.fn(pending),
+    getRecommendations: vi.fn(pending),
+    getFinancialHealth: vi.fn(pending),
+  };
+});
+vi.mock('@/services/intelligence.service', () => intelligence);
 
 const transactions = vi.hoisted(() => ({ listTransactions: vi.fn(), updateTransaction: vi.fn() }));
 vi.mock('@/services/transactions.service', () => transactions);
@@ -190,6 +204,7 @@ describe('scheduleValuesFromCandidate', () => {
 
 describe('InsightsPage', () => {
   it('shows patterns with exact figures, explains on request, and hides on request', async () => {
+    location.search = 'tab=spending';
     ai.explainInsight.mockResolvedValue({
       key: INSIGHTS.items[0]?.key ?? '',
       explanation: 'Food took ₹6,000.00 in October, up from ₹4,000.00.',
@@ -226,6 +241,7 @@ describe('InsightsPage', () => {
   });
 
   it('keeps patterns and suggestions working without AI, minus explanations', async () => {
+    location.search = 'tab=spending';
     ai.getAiStatus.mockResolvedValue({ ...READY, available: false, problem: 'unreachable' });
     renderWithAuth(<InsightsPage />);
 
@@ -233,12 +249,13 @@ describe('InsightsPage', () => {
       await screen.findByRole('heading', { name: 'Food spending rose by 50.0%' }),
     ).toBeDefined();
     expect(
-      screen.getByText(/Patterns, repeating payments, history-based suggestions/),
+      screen.getByText(/Every figure, forecast, and recommendation still works/),
     ).toBeDefined();
     expect(screen.queryByRole('button', { name: 'Explain' })).toBeNull();
   });
 
   it('opens the subscription form filled in from a repeating payment, without saving', async () => {
+    location.search = 'tab=more';
     const user = userEvent.setup();
     renderWithAuth(<InsightsPage />);
 
@@ -253,6 +270,7 @@ describe('InsightsPage', () => {
   });
 
   it('suggests categories for uncategorised transactions and applies one on accept', async () => {
+    location.search = 'tab=more';
     ai.suggestCategories.mockResolvedValue({
       items: [
         {
@@ -280,6 +298,7 @@ describe('InsightsPage', () => {
   });
 
   it('creates a report for the selected period on request', async () => {
+    location.search = 'tab=more';
     ai.createReport.mockResolvedValue({
       kind: 'period',
       period: { from: '2026-10-01', to: '2026-10-31' },

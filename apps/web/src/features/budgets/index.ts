@@ -7,3 +7,5 @@ export {
   budgetTransactionsHref,
   describeRatio,
 } from './budget-presentation';
+export { BudgetForm, type BudgetFormMode } from './components/budget-form';
+export type { BudgetFormValues } from './budget-form-model';

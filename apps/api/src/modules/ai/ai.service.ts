@@ -14,6 +14,8 @@ import {
   type FinancialReportDto,
   type FinancialReportInput,
   type InsightExplanationDto,
+  type IntelligenceExplanationDto,
+  type IntelligenceExplanationInput,
   type MerchantRuleDto,
   type MerchantSuggestionsDto,
   type SearchInterpretationDto,
@@ -23,7 +25,7 @@ import {
 
 import { AppError } from '../../lib/app-error';
 import type { Caller } from '../../lib/auth-boundary';
-import { formatMoney } from '../../lib/text-format';
+import { clip, formatMoney } from '../../lib/text-format';
 import type { AiRepository, ConversationRecord, MessageRecord } from './ai.repository';
 import { readBlocks } from './ai.repository';
 import { answerQuestion, titleFrom } from './assistant';
@@ -33,7 +35,17 @@ import { AI_PROBLEM_MESSAGES, AiUnavailableError, type AiProvider } from './prov
 import { buildReport } from './reports';
 import { interpretSearch } from './search';
 import { suggestCategories, suggestCategoryForEntry, suggestMerchants } from './suggestions';
-import type { ToolContext, ToolServices, UserReferences } from './tools';
+import {
+  budgetFacts,
+  cashFlowFacts,
+  goalFacts,
+  healthFacts,
+  recommendationFacts,
+  scenarioFacts,
+  spendingForecastFacts,
+  type IntelligenceFacts,
+} from './intelligence-facts';
+import { factLines, type ToolContext, type ToolServices, type UserReferences } from './tools';
 import type { CategoriesService } from '../categories/categories.service';
 import type { TransactionsService } from '../transactions/transactions.service';
 
@@ -78,6 +90,11 @@ export interface AiService {
   interpretSearch: (caller: Caller, query: string) => Promise<SearchInterpretationDto>;
   report: (caller: Caller, input: FinancialReportInput) => Promise<FinancialReportDto>;
   explainInsight: (caller: Caller, input: ExplainInsightInput) => Promise<InsightExplanationDto>;
+  /** Plain words for a forecast, prediction, projection, or scenario (template without AI). */
+  explainIntelligence: (
+    caller: Caller,
+    input: IntelligenceExplanationInput,
+  ) => Promise<IntelligenceExplanationDto>;
 }
 
 export interface AiServiceDependencies {
@@ -405,6 +422,95 @@ export function createAiService({
         purpose: 'insight_explanation',
       });
       return { key, explanation: narration.text, narrative: narration.source };
+    },
+
+    explainIntelligence: async (caller, input) => {
+      const { intelligence } = tools;
+      // 1–4: the deterministic result, as the pages show it, turned into labelled facts.
+      let facts: IntelligenceFacts;
+      let calculatedAt: string;
+      switch (input.subject) {
+        case 'cashflow_forecast': {
+          const dto = await intelligence.cashFlowForecast(caller, {
+            horizon: input.horizon ?? 30,
+            income: 'scheduled',
+            ...(input.currency === undefined ? {} : { currency: input.currency }),
+          });
+          facts = cashFlowFacts(dto);
+          calculatedAt = dto.calculatedAt;
+          break;
+        }
+        case 'spending_forecast': {
+          const dto = await intelligence.spendingForecast(caller, {
+            period: 'this-month',
+            ...(input.currency === undefined ? {} : { currency: input.currency }),
+          });
+          facts = spendingForecastFacts(dto);
+          calculatedAt = dto.calculatedAt;
+          break;
+        }
+        case 'financial_health': {
+          const dto = await intelligence.financialHealth(
+            caller,
+            input.currency === undefined ? {} : { currency: input.currency },
+          );
+          facts = healthFacts(dto);
+          calculatedAt = dto.calculatedAt;
+          break;
+        }
+        case 'budget_recommendations': {
+          const dto = await intelligence.budgetRecommendations(
+            caller,
+            input.currency === undefined ? {} : { currency: input.currency },
+          );
+          facts = budgetFacts(dto);
+          calculatedAt = dto.calculatedAt;
+          break;
+        }
+        case 'goal_projections': {
+          const dto = await intelligence.goalProjections(caller);
+          facts = goalFacts(dto.goals);
+          calculatedAt = dto.calculatedAt;
+          break;
+        }
+        case 'recommendation': {
+          const dto = await intelligence.recommendations(
+            caller,
+            input.currency === undefined ? {} : { currency: input.currency },
+          );
+          const item = dto.items.find((entry) => entry.key === input.key);
+          if (item === undefined) {
+            throw new AppError(404, 'NOT_FOUND', 'That recommendation is not available any more.');
+          }
+          facts = recommendationFacts([item]);
+          calculatedAt = dto.calculatedAt;
+          break;
+        }
+        case 'scenario': {
+          const dto = await intelligence.runScenario(caller, input.scenarioId);
+          facts = scenarioFacts(dto);
+          calculatedAt = dto.calculatedAt;
+          break;
+        }
+      }
+      const lines = factLines(facts.blocks)
+        .map((line) => clip(line, 400))
+        .slice(0, 60);
+      // 5–7: the model only words them; its wording is grounding-checked or replaced.
+      const narration = await narrate(await optionalAi(caller), {
+        question:
+          'Explain these calculated figures in plain words. Say which are actual, scheduled, or estimated, and what the estimate depends on. Do not add any number.',
+        facts: lines,
+        template: facts.summary,
+        purpose: 'intelligence_explanation',
+      });
+      return {
+        subject: input.subject,
+        explanation: clip(narration.text, 1_200),
+        narrative: narration.source,
+        facts: lines,
+        calculatedAt,
+      };
     },
   };
 }

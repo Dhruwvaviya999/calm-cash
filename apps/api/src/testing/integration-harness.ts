@@ -30,6 +30,7 @@ import {
 import { createPrismaNotificationsRepository } from '../modules/notifications';
 import { createPrismaAiRepository } from '../modules/ai/ai.repository';
 import { createPrismaInsightsRepository } from '../modules/insights/insights.repository';
+import { createPrismaIntelligenceRepository } from '../modules/intelligence/intelligence.repository';
 import { createFakeAiProvider, type FakeAiProvider } from './fake-ai-provider';
 import { createPrismaReceiptsRepository } from '../modules/receipts/receipts.repository';
 import type { FileStorage } from '../lib/file-storage';
@@ -205,6 +206,11 @@ export function useIntegrationDatabase(): {
           now: clock.now,
         },
         insights: { repository: createPrismaInsightsRepository(prisma) },
+        intelligence: {
+          repository: createPrismaIntelligenceRepository(prisma),
+          now: clock.now,
+          rateLimit: { limit: 10_000, windowMs: 60_000 },
+        },
       });
       return { app, prisma, repository, email, clock, tasks, storage, ai };
     },

@@ -262,6 +262,27 @@ tests cover the assistant page, answer blocks and links, Settings → AI & priva
 entry form, category suggestions, plain-word search chips, and the insights page. No test calls a
 real model or an external service.
 
+**Financial intelligence tests (Phase 11).** Unit tests with fixed dates and hand-computed expectations
+(`src/modules/intelligence/*.test.ts`): proration, rounding, trends, quartiles; history eligibility
+and data sufficiency; the forecast (scheduled income and bills, overdue bills counted and overdue
+income not, insufficient history, zero income and negative projections, estimated income only when
+asked, irregular income and schedule-heavy warnings, month ends and 29 February, bucket sizes, no
+double counting of recorded bills); category predictions (median against outliers, partial months,
+too little history); budget suggestions and flags; goal projections (pace, required amount, no
+history, no or expired target date, over-completed goals); scenarios (category, income, schedule,
+one-off, debt, goal changes, not-applicable changes, month limits, inputs never mutated); health
+indicators; recommendations (none without history, reviewed, dismissed). Integration tests
+(`intelligence.integration.test.ts`) run the real SQL: authentication and cross-user isolation,
+starting position equal to the accounts summary, recorded rent kept out of the baseline, voided
+expenses/transfers/other currencies excluded, subcategory roll-up, exact percentiles and payee
+grouping, goal projections from dated allocations, scenario CRUD/run/compare with no transaction,
+balance, schedule, or budget change, recommendation review/dismiss, and the assistant tools with the
+scripted model (invented numbers and promises replaced by the template, a percentage the person did
+not write refused, record text fenced as data, explanation without AI). Web tests cover the
+forecast, recommendations, scenario form model, and scenario result. To try a forecast quickly,
+record a few months of expenses with past dates and schedule a monthly bill; a fresh account shows
+"Not enough history" until two completed months have spending.
+
 **Before pushing**, run the same gates CI should run:
 
 ```bash

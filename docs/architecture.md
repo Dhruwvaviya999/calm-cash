@@ -5,7 +5,8 @@ rules that keep features decoupled as the product grows. It reflects the Phase 1
 Phase 3 authentication layer (detailed in [authentication.md](./authentication.md)), the Phase 4
 accounts module, the Phase 5 transactions, categories, and tags modules, the Phase 6 dashboard,
 the Phase 7 planning modules (budgets, recurring schedules, subscriptions, savings goals), the Phase 8
-statement imports and receipts, and the Phase 9 notifications and background worker.
+statement imports and receipts, the Phase 9 notifications and background worker, the Phase 10
+assistant, and the Phase 11 financial intelligence (§20).
 
 ## 1. Overview
 
@@ -361,6 +362,9 @@ Rules that keep modules independent:
 - **Notifications and automation (Phase 9, done):** see
   [§18](#18-notifications-and-automation-phase-9) and
   [database-design.md §3f](./database-design.md#3f-notifications-and-automation-phase-9).
+- **AI assistant (Phase 10, done):** see [§19](#19-ai-assistant-and-insights-phase-10).
+- **Financial intelligence (Phase 11, done):** see [§20](#20-financial-intelligence-phase-11) and
+  [database-design.md §3i](./database-design.md#3i-financial-intelligence-phase-11).
 
 ## 13. Accounts module (Phase 4)
 
@@ -902,3 +906,144 @@ become clarifications or template wording, never wrong figures or wrong records.
 - Conversations are kept until the person deletes them (one at a time, or all in Settings).
 - Vercel Functions cannot reach an Ollama on a private network; see
   [vercel-deployment.md](./vercel-deployment.md#ai-features) for running AI there.
+
+## 20. Financial intelligence (Phase 11)
+
+Phase 11 adds forecasts, spending predictions, budget suggestions, goal projections, financial
+health indicators, recommendations, and what-if scenarios. **Every figure is calculated by
+deterministic code from the ledger and confirmed schedules**; the local model may only explain the
+results (§19), and nothing here records money or changes a budget, schedule, subscription, or goal.
+Everything is an estimate and is labelled as one; no result is called guaranteed or statistically
+validated.
+
+```text
+ /api/v1/intelligence/* ──▶ intelligence.service ──▶ accounts.summary/list (balances, account-balance.ts)
+                                 │  (one request scope:   dashboard.repository (cash-flow totals, trends, categories)
+                                 │   each query once)     budgets.list/summary · recurring.collect/list
+                                 │                        subscriptions.list/summary · goals.list
+                                 │                        intelligence.repository (read-only aggregates)
+                                 ▼
+             pure engines: history · statistics · cash-flow-forecast · spending-forecast ·
+             budget-recommendations · goal-projections · scenarios · financial-health ·
+             recommendations · spending-patterns · methodology
+                                 │
+ /api/v1/ai/intelligence-explanations and 8 assistant tools ──▶ intelligence-facts ──▶ narrate (grounded)
+```
+
+### Layout (`apps/api/src/modules/intelligence`)
+
+| File                         | Responsibility                                                                                         |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `intelligence.repository.ts` | Read-only SQL aggregates (monthly totals, percentiles, merchants, goal months); scenarios; rec. states |
+| `history.ts`                 | Completed-month history and the data-sufficiency classification.                                       |
+| `statistics.ts`              | Exact `bigint` mean/median/quartiles, proration, trend, readable rounding.                             |
+| `cash-flow-forecast.ts`      | The forecast formula, timeline buckets, and warnings.                                                  |
+| `spending-forecast.ts`       | Category predictions for this or next month.                                                           |
+| `budget-recommendations.ts`  | Suggested limits and budget-performance flags.                                                         |
+| `goal-projections.ts`        | Pace, projected completion, required contribution, state, suggestions.                                 |
+| `scenarios.ts`               | Baseline vs. simulated projection; per-change effects; goal and budget impacts.                        |
+| `financial-health.ts`        | Explainable indicators (no overall score).                                                             |
+| `recommendations.ts`         | Evidence-backed recommendations with observation/suggestion split and stable keys.                     |
+| `spending-patterns.ts`       | Historical analysis assembled from the aggregates.                                                     |
+| `methodology.ts`             | The documented method returned with every result (version `INTELLIGENCE_METHODOLOGY_VERSION`).         |
+| `intelligence.service.ts`    | Gathers data through other modules' services; never writes ledger data.                                |
+| `intelligence.routes.ts`     | Routes, Zod validation, per-user rate limit.                                                           |
+
+The module reuses, never re-implements: balances come from the accounts service (`account-balance.ts`),
+cash-flow totals and category roll-ups from the dashboard repository (`cashFlowScope` — the one
+definition of income and spending), pending and recorded occurrences from `RecurringService.collect`,
+budget progress from `BudgetsService.list` (asked for past dates to review completed periods), goal
+progress from `GoalsService.list` and the shared `calculateGoalProgress`, and "typical" (median,
+nearest-rank percentile) from the insights module.
+
+### API (`/api/v1/intelligence`, session + CSRF, `no-store`, 600 requests / 10 min per user)
+
+| Endpoint                                                                             | Purpose                                                         |
+| ------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
+| `GET /overview?currency=`                                                            | This month's actual cash flow, money held and owed              |
+| `GET /cashflow-forecast?horizon=7\|30\|60\|90&income=&currency=`                     | Projection per currency (`income=scheduled` by default)         |
+| `GET /spending-forecast?period=this-month\|next-month`                               | Category predictions                                            |
+| `GET /spending-patterns?period=&from=&to=&currency=`                                 | Historical analysis (presets or a custom range ≤ 3 years)       |
+| `GET /budget-recommendations?currency=`                                              | Suggested limits, performance flags, form prefill               |
+| `GET /goal-projections`                                                              | Goal pace and projected completion                              |
+| `GET /financial-health?currency=`                                                    | Explainable indicators                                          |
+| `GET /recommendations?currency=` · `POST /recommendations/:key/dismiss` · `…/review` | Recommendations and their state                                 |
+| `GET`/`POST /scenarios` · `GET`/`PATCH`/`DELETE /scenarios/:id`                      | Saved scenarios (assumptions only; 20 per page, 50 per user)    |
+| `POST /scenarios/preview` · `POST /scenarios/:id/run` · `POST /scenarios/compare`    | Simulate (unsaved, saved, up to three)                          |
+| `POST /ai/intelligence-explanations`                                                 | Plain words for one result (AI rate limit; template without AI) |
+
+Queries are strict (unknown fields such as `userId` are rejected); horizons, ranges, list sizes,
+adjustments (≤ 10), and amounts (≤ the entered-amount maximum) are bounded. Another person's
+scenario answers like a missing one; a scenario that names another person's category, schedule, or
+goal is refused (`400`), and one whose references were archived later runs with that change marked
+"not applied".
+
+### Methods (also returned in every response's `methodology`)
+
+- **History.** The last six completed calendar months in the user's time zone, one currency.
+  Months before the first recorded income or expense are not history; the first month counts only
+  when recording began in its first seven days.
+- **Data sufficiency** (never a model's confidence): `insufficient` with fewer than two completed
+  months with spending or fewer than ten expenses (no estimate is made); `limited` with two;
+  `moderate` with three to five; `strong` with six.
+- **Cash-flow forecast.** Projected net position = (money held − money owed now) + scheduled income
+  due from today to the horizon + (optional) typical unscheduled income − scheduled expenses due
+  (overdue bills counted; overdue income never assumed) − typical unscheduled spending × days × 48 ÷
+  1461 (365.25 ÷ 12 days per month). "Typical" is the median of completed months. Recorded
+  occurrences already moved the balance and are not counted again; transactions recorded _from_ a
+  schedule are excluded from the unscheduled baseline, so a bill is never counted twice. The range
+  uses the lowest and highest completed month and is explicitly not a confidence interval. Daily
+  buckets up to 30 days, weekly beyond.
+- **Category predictions.** Estimated month end = actual so far + typical month × remaining days ÷
+  days in month; next month = typical month. Trend needs six months and a 20 % change of medians.
+- **Budget suggestions.** Average month and lower quartile, rounded up (100 units from 1,000; 10
+  from 100; otherwise 1), with "N of M months stayed within". Flags: over the limit in ≥ 2 of the
+  last 4 completed months; < 50 % used in each of ≥ 3 (reported as unused, never as unnecessary);
+  limit below the lower quartile; rising; high variability.
+- **Goals.** Pace = net allocations over the completed months since the first allocation (≤ 6, at
+  least 2), rounded down; completion = today + ⌈remaining ÷ pace⌉ months; required = the shared
+  `calculateGoalProgress`. Goals never receive money automatically.
+- **Scenarios.** Baseline as the forecast (scheduled income only); each change adds its own
+  cumulative effect (category changes act on that category's typical unscheduled month; schedule
+  changes on pending occurrences; debt payments move held and owed but not the net position; goal
+  changes affect goal outcomes only). Results are never stored.
+- **Health.** Savings rate, month-to-month consistency, income stability, budgets, repeated
+  overspending, scheduled bills against typical income, subscriptions, goal pace, money held and
+  owed, money held compared with typical spending. No score; money held is never called an
+  emergency fund; this is not a net worth.
+- **Recommendations.** Forecast shortfall, repeated overspending, budget suggestion, goal behind,
+  subscription review (usage unknown), payments clustered in one week, category increase (last three
+  months vs. the three before). None from insufficient history; keys include the period, so a
+  dismissal lasts until the subject changes.
+
+### AI integration
+
+Eight allowlisted, read-only tools join `AI_TOOL_NAMES`: `getCashFlowForecast`,
+`getCategorySpendingForecast`, `getFinancialHealth`, `getSavingsGoalProjection`,
+`getBudgetRecommendations`, `runFinancialScenario`, `getAdvancedSpendingPatterns`,
+`explainFinancialRecommendation`. They call the intelligence service as the session's user and turn
+results into figures through `ai/intelligence-facts.ts`, labelled actual, scheduled, estimate, or
+simulation. `runFinancialScenario` runs a saved scenario by name, or a one-category change only when
+the percentage appears in the person's own question (a number the model chose is refused). Narration
+gained a rule that estimates are not certain, and wording that promises outcomes or gives investment
+advice ("guaranteed", "will definitely", "invest in", …) is replaced by the template, like an
+ungrounded number. Without Ollama every endpoint works; explanations use the fixed summary.
+
+### Performance
+
+All aggregation runs in PostgreSQL on the existing `transactions (user_id, occurred_at DESC)` index;
+no new index, cache, materialized view, or worker job was added. Measured with `EXPLAIN ANALYZE` on
+20,000 expenses for one user (plus 50,000 for another) in `calmcash_test`: monthly totals for seven
+months 7 ms, exact percentiles over twelve months 5 ms, merchant grouping over 24 months 89 ms (the
+regular expressions dominate; a stored payee-key column would be the next optimisation if needed).
+One request scope loads each input once (recommendations reuse the forecast's history and pending
+occurrences). Every calculation is bounded and synchronous, so the Phase 9 worker gained nothing.
+
+### Known limitations
+
+- A bill paid without recording its occurrence stays overdue and is counted as still to pay (and its
+  transaction also counts as everyday spending).
+- Forecasts are per currency, not per account; there is no currency conversion.
+- Scenario category changes use main categories only; goal reminders are not part of notifications.
+- On a CPU-only machine `qwen3:1.7b` can take longer than the request timeout for an explanation;
+  the fixed wording is then shown (the figures are identical either way).

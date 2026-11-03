@@ -29,6 +29,7 @@ describe('navigation config', () => {
     ]);
     expect(getMobileMoreItems().map((item) => item.id)).toEqual([
       'insights',
+      'scenarios',
       'assistant',
       'imports',
       'settings',

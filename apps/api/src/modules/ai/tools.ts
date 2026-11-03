@@ -2,6 +2,11 @@ import {
   addDaysToIsoDate,
   AI_LIMITS,
   AI_TOOL_NAMES,
+  FORECAST_HORIZONS,
+  presetRange,
+  SCENARIO_HORIZONS,
+  type FinancialScenarioDto,
+  type SpendingPatternsQuery,
   currencyCodeSchema,
   addMonthsToIsoDate,
   transactionListQuerySchema,
@@ -24,6 +29,18 @@ import type { DashboardService } from '../dashboard/dashboard.service';
 import type { GoalsService } from '../goals/goals.service';
 import { changeBp } from '../insights/patterns';
 import type { InsightsService } from '../insights/insights.service';
+import type { IntelligenceService } from '../intelligence/intelligence.service';
+import { normalizeNumber, numbersIn } from './grounding';
+import {
+  budgetFacts,
+  cashFlowFacts,
+  goalFacts,
+  healthFacts,
+  patternsFacts,
+  recommendationFacts,
+  scenarioFacts,
+  spendingForecastFacts,
+} from './intelligence-facts';
 import type { RecurringService } from '../recurring/recurring.service';
 import type { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import type { TransactionsService } from '../transactions/transactions.service';
@@ -67,7 +84,30 @@ export const toolCallPlanSchema = z.object({
   minAmount: z.string().max(20).nullish(),
   maxAmount: z.string().max(20).nullish(),
   sort: z.enum(['newest', 'largest']).nullish(),
-  days: z.number().int().min(1).max(90).nullish().describe('getUpcomingPayments only: days ahead.'),
+  days: z
+    .number()
+    .int()
+    .min(1)
+    .max(90)
+    .nullish()
+    .describe('getUpcomingPayments, getCashFlowForecast, runFinancialScenario: days ahead.'),
+  forecastPeriod: z
+    .enum(['this-month', 'next-month'])
+    .nullish()
+    .describe('getCategorySpendingForecast only.'),
+  scenario: z
+    .string()
+    .max(80)
+    .nullish()
+    .describe('runFinancialScenario: the name of a saved scenario the user mentioned.'),
+  percent: z
+    .number()
+    .min(1)
+    .max(100)
+    .nullish()
+    .describe('runFinancialScenario: a percentage the user wrote, e.g. 15.'),
+  direction: z.enum(['decrease', 'increase']).nullish().describe('runFinancialScenario only.'),
+  goal: z.string().max(60).nullish().describe('A savings-goal name the user mentioned.'),
 });
 
 export type ToolCallPlan = z.output<typeof toolCallPlanSchema>;
@@ -81,6 +121,19 @@ export interface ToolServices {
   subscriptions: Pick<SubscriptionsService, 'list'>;
   goals: Pick<GoalsService, 'list'>;
   insights: Pick<InsightsService, 'list' | 'topPayees'>;
+  intelligence: Pick<
+    IntelligenceService,
+    | 'cashFlowForecast'
+    | 'spendingForecast'
+    | 'spendingPatterns'
+    | 'financialHealth'
+    | 'goalProjections'
+    | 'budgetRecommendations'
+    | 'recommendations'
+    | 'listScenarios'
+    | 'runScenario'
+    | 'previewScenario'
+  >;
 }
 
 export interface UserReferences {
@@ -93,6 +146,8 @@ export interface ToolContext {
   services: ToolServices;
   today: string;
   refs: UserReferences;
+  /** The person's question; a number a tool acts on must appear in it (never one the model chose). */
+  question?: string;
 }
 
 export interface ToolOutcome {
@@ -120,6 +175,22 @@ export const TOOL_DESCRIPTIONS: Readonly<Record<(typeof AI_TOOL_NAMES)[number], 
   getSavingsGoals: 'savings goals: saved, target, remaining',
   getSpendingPatterns: 'notable changes, unusual expenses, frequent merchants in a period',
   getTopMerchants: 'merchants paid most often in a period',
+  getCashFlowForecast:
+    'estimated money position in the coming days (days: 7, 30, 60, or 90) from schedules and typical spending',
+  getCategorySpendingForecast:
+    'estimated spending per category by the end of this month or next month (forecastPeriod)',
+  getFinancialHealth:
+    'explainable indicators: savings rate, budgets, bills against income, money held',
+  getSavingsGoalProjection:
+    'when savings goals could be reached and how much is needed per month (goal)',
+  getBudgetRecommendations:
+    'suggested budget limits from past months, and budgets often exceeded (category)',
+  runFinancialScenario:
+    'what-if: a saved scenario by name (scenario), or spending in a category changed by a percent (category, percent, direction, days)',
+  getAdvancedSpendingPatterns:
+    'detailed history for a period: categories, merchants, typical and largest expenses',
+  explainFinancialRecommendation:
+    'current recommendations with their evidence (text: words of one)',
 };
 
 // --- Argument resolution -------------------------------------------------------------------------
@@ -251,11 +322,248 @@ function dashboardLink(query: DashboardQuery, currency: CurrencyCode): Assistant
   };
 }
 
-// --- Tools ---------------------------------------------------------------------------------------
+// --- Intelligence tools (Phase 11) --------------------------------------------------------------
 
 type ToolExecutor = (call: ToolCallPlan, context: ToolContext) => Promise<ToolOutcome>;
 
+function notice(text: string, tone: 'info' | 'warning' = 'info'): AssistantBlockDto {
+  return { kind: 'notice', tone, text };
+}
+
+/** The smallest allowed horizon that covers `days` (30 days by default). */
+function horizonFor<const T extends readonly number[]>(
+  allowed: T,
+  days: number | null | undefined,
+): T[number] | undefined {
+  const wanted = days ?? 30;
+  return allowed.find((value) => value >= wanted) ?? allowed.at(-1);
+}
+
+/** Dashboard-style presets in the plan, mapped to the historical-analysis periods. */
+function patternQuery(call: ToolCallPlan, today: string): SpendingPatternsQuery {
+  const currency = currencyOf(call);
+  const base = currency === undefined ? {} : { currency };
+  switch (call.period) {
+    case 'this-month':
+    case 'last-month': {
+      const range = presetRange(call.period, today);
+      return { period: 'custom', from: range.from, to: range.to, ...base };
+    }
+    case 'last-6-months':
+      return { period: 'last-6-months', ...base };
+    case 'this-year':
+      return { period: 'this-year', ...base };
+    case 'last-3-months':
+    case null:
+    case undefined:
+      return { period: 'last-90-days', ...base };
+  }
+}
+
+const intelligenceExecutors = {
+  getCashFlowForecast: async (call, { caller, services }) => {
+    const currency = currencyOf(call);
+    const dto = await services.intelligence.cashFlowForecast(caller, {
+      horizon: horizonFor(FORECAST_HORIZONS, call.days) ?? 30,
+      income: 'scheduled',
+      ...(currency === undefined ? {} : { currency }),
+    });
+    const facts = cashFlowFacts(dto);
+    return outcome(
+      facts.blocks,
+      [{ label: 'Open forecasts', target: { kind: 'insights' } }],
+      facts.summary,
+    );
+  },
+
+  getCategorySpendingForecast: async (call, { caller, services }) => {
+    const currency = currencyOf(call);
+    const dto = await services.intelligence.spendingForecast(caller, {
+      period: call.forecastPeriod ?? 'this-month',
+      ...(currency === undefined ? {} : { currency }),
+    });
+    const facts = spendingForecastFacts(dto);
+    return outcome(
+      facts.blocks,
+      [{ label: 'Open forecasts', target: { kind: 'insights' } }],
+      facts.summary,
+    );
+  },
+
+  getFinancialHealth: async (call, { caller, services }) => {
+    const currency = currencyOf(call);
+    const dto = await services.intelligence.financialHealth(
+      caller,
+      currency === undefined ? {} : { currency },
+    );
+    const facts = healthFacts(dto);
+    return outcome(
+      facts.blocks,
+      [{ label: 'Open insights', target: { kind: 'insights' } }],
+      facts.summary,
+    );
+  },
+
+  getSavingsGoalProjection: async (call, { caller, services }) => {
+    const { goals } = await services.intelligence.goalProjections(caller);
+    const unresolved: string[] = [];
+    let chosen = goals;
+    if (call.goal !== undefined && call.goal !== null) {
+      const match = matchByName(goals, call.goal);
+      if (match === undefined) unresolved.push(call.goal);
+      else chosen = [match];
+    }
+    const facts = goalFacts(chosen);
+    return outcome(
+      facts.blocks,
+      [{ label: 'Open savings goals', target: { kind: 'goals' } }],
+      facts.summary,
+      unresolved,
+    );
+  },
+
+  getBudgetRecommendations: async (call, { caller, services }) => {
+    const currency = currencyOf(call);
+    const dto = await services.intelligence.budgetRecommendations(
+      caller,
+      currency === undefined ? {} : { currency },
+    );
+    const unresolved: string[] = [];
+    let items = dto.items;
+    if (call.category !== undefined && call.category !== null) {
+      const match = matchByName(
+        items.map((item) => ({ key: item.key, name: item.categoryName })),
+        call.category,
+      );
+      if (match === undefined) unresolved.push(call.category);
+      else items = items.filter((item) => item.key === match.key);
+    }
+    const facts = budgetFacts({ ...dto, items });
+    return outcome(
+      facts.blocks,
+      [{ label: 'Open budgets', target: { kind: 'budgets' } }],
+      facts.summary,
+      unresolved,
+    );
+  },
+
+  runFinancialScenario: async (call, { caller, services, refs, question }) => {
+    const links: AssistantLinkDto[] = [{ label: 'Open scenarios', target: { kind: 'scenarios' } }];
+    const named = call.scenario?.trim() ?? '';
+    if (named !== '') {
+      const saved: FinancialScenarioDto[] = [];
+      for (let page = 1; page <= 3; page += 1) {
+        const list = await services.intelligence.listScenarios(caller, { page });
+        saved.push(...list.items);
+        if (page >= list.pagination.totalPages) break;
+      }
+      const match = matchByName(saved, named);
+      if (match === undefined) {
+        return outcome(
+          [notice(`You have no saved scenario called “${named.slice(0, 40)}”.`)],
+          links,
+          'No saved scenario matches that name.',
+          [named],
+        );
+      }
+      const facts = scenarioFacts(await services.intelligence.runScenario(caller, match.id));
+      return outcome(facts.blocks, links, facts.summary);
+    }
+    const percent = call.percent ?? undefined;
+    const categoryName = call.category ?? undefined;
+    // The percentage must be one the person wrote, never one the model picked.
+    const written =
+      percent !== undefined && numbersIn(question ?? '').includes(normalizeNumber(String(percent)));
+    const percentBp = percent === undefined ? undefined : Math.round(percent * 100);
+    if (
+      percentBp === undefined ||
+      categoryName === undefined ||
+      !written ||
+      percentBp !== percent * 100
+    ) {
+      return outcome(
+        [
+          notice(
+            'Name a saved scenario, or say a category and a percentage, e.g. “What if I spend 15% less on dining?”.',
+          ),
+        ],
+        links,
+        'I need a saved scenario, or a category and a percentage you wrote, to run a simulation.',
+      );
+    }
+    const category = matchByName(
+      refs.categories.filter((item) => item.kind === 'expense' && item.parentId === undefined),
+      categoryName,
+    );
+    if (category === undefined) {
+      return outcome(
+        [
+          notice(
+            `No main expense category of yours is called “${categoryName.slice(0, 40)}”.`,
+            'warning',
+          ),
+        ],
+        links,
+        'That category could not be found among yours.',
+        [categoryName],
+      );
+    }
+    const direction = call.direction ?? 'decrease';
+    const result = await services.intelligence.previewScenario(caller, {
+      name: `${direction === 'decrease' ? 'Less' : 'More'} ${category.name}`.slice(0, 80),
+      currency: currencyOf(call) ?? caller.preferredCurrency,
+      horizonDays: horizonFor(SCENARIO_HORIZONS, call.days) ?? 30,
+      adjustments: [
+        {
+          kind: 'category_spending',
+          categoryId: category.id,
+          direction,
+          change: { by: 'percent', percentBp },
+        },
+      ],
+    });
+    const facts = scenarioFacts(result);
+    return outcome(facts.blocks, links, facts.summary);
+  },
+
+  getAdvancedSpendingPatterns: async (call, { caller, services, today }) => {
+    const facts = patternsFacts(
+      await services.intelligence.spendingPatterns(caller, patternQuery(call, today)),
+    );
+    return outcome(
+      facts.blocks,
+      [{ label: 'Open insights', target: { kind: 'insights' } }],
+      facts.summary,
+    );
+  },
+
+  explainFinancialRecommendation: async (call, { caller, services }) => {
+    const currency = currencyOf(call);
+    const { items } = await services.intelligence.recommendations(
+      caller,
+      currency === undefined ? {} : { currency },
+    );
+    const words = (call.text ?? '')
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((word) => word.length >= 3);
+    const matching =
+      words.length === 0
+        ? items
+        : items.filter((item) => words.some((word) => item.title.toLowerCase().includes(word)));
+    const facts = recommendationFacts(matching.length === 0 ? items : matching);
+    return outcome(
+      facts.blocks,
+      [{ label: 'Open insights', target: { kind: 'insights' } }],
+      facts.summary,
+    );
+  },
+} satisfies Readonly<Record<string, ToolExecutor>>;
+
+// --- Tools ---------------------------------------------------------------------------------------
+
 const executors: Readonly<Record<(typeof AI_TOOL_NAMES)[number], ToolExecutor>> = {
+  ...intelligenceExecutors,
   getFinancialOverview: async (call, { caller, services, today }) => {
     const query = periodQuery(call, today);
     const overview = await services.dashboard.overview(caller, query);

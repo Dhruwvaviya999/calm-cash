@@ -19,6 +19,15 @@ export const AI_TOOL_NAMES = [
   'getSavingsGoals',
   'getSpendingPatterns',
   'getTopMerchants',
+  // Phase 11: estimates and simulations, calculated by the financial-intelligence services.
+  'getCashFlowForecast',
+  'getCategorySpendingForecast',
+  'getFinancialHealth',
+  'getSavingsGoalProjection',
+  'getBudgetRecommendations',
+  'runFinancialScenario',
+  'getAdvancedSpendingPatterns',
+  'explainFinancialRecommendation',
 ] as const;
 
 export type AiToolName = (typeof AI_TOOL_NAMES)[number];
@@ -84,6 +93,8 @@ export const AI_DISMISSAL_KINDS = [
   'merchant',
   'recurring_candidate',
   'insight',
+  // Phase 11: a financial recommendation, with `value` `dismissed` or `reviewed`.
+  'recommendation',
 ] as const;
 export type AiDismissalKind = (typeof AI_DISMISSAL_KINDS)[number];
 

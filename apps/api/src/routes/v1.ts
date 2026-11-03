@@ -33,6 +33,11 @@ import { createBudgetsService } from '../modules/budgets/budgets.service';
 import { createCategoriesService } from '../modules/categories/categories.service';
 import { createDashboardService } from '../modules/dashboard/dashboard.service';
 import { createInsightsRouter } from '../modules/insights/insights.routes';
+import {
+  createIntelligenceRouter,
+  type IntelligenceModuleDependencies,
+} from '../modules/intelligence/intelligence.routes';
+import { createIntelligenceService } from '../modules/intelligence/intelligence.service';
 import { createInsightsService } from '../modules/insights/insights.service';
 import { createSubscriptionsService } from '../modules/subscriptions/subscriptions.service';
 import { createHealthRouter } from '../modules/health/health.routes';
@@ -79,6 +84,7 @@ export interface V1RouterDependencies {
   notifications: NotificationsModuleDependencies;
   ai: AiModuleDependencies;
   insights: InsightsModuleDependencies;
+  intelligence: IntelligenceModuleDependencies;
 }
 
 /**
@@ -159,15 +165,40 @@ export function createV1Router(dependencies: V1RouterDependencies): Router {
     now: aiNow,
   });
   router.use('/insights', createInsightsRouter(insights, boundary));
+
+  // Financial intelligence (Phase 11): forecasts, predictions, suggestions, and scenarios computed
+  // from the same services and the dashboard's cash-flow queries. Read-only over the ledger; it
+  // stores only scenario assumptions and recommendation states.
+  const intelligenceNow = dependencies.intelligence.now ?? aiNow;
+  const subscriptions = createSubscriptionsService(recurring);
+  const intelligence = createIntelligenceService({
+    repository: dependencies.intelligence.repository,
+    dashboard: dependencies.dashboard.repository,
+    accounts,
+    budgets: createBudgetsService({
+      repository: dependencies.budgets.repository,
+      now: intelligenceNow,
+    }),
+    recurring,
+    subscriptions,
+    goals: createGoalsService({ repository: dependencies.goals.repository, now: intelligenceNow }),
+    now: intelligenceNow,
+  });
+  router.use(
+    '/intelligence',
+    createIntelligenceRouter(intelligence, boundary, dependencies.intelligence.rateLimit),
+  );
+
   const toolServices = {
     dashboard,
     accounts,
     transactions,
     budgets: createBudgetsService({ repository: dependencies.budgets.repository, now: aiNow }),
     recurring,
-    subscriptions: createSubscriptionsService(recurring),
+    subscriptions,
     goals: createGoalsService({ repository: dependencies.goals.repository, now: aiNow }),
     insights,
+    intelligence,
   };
   router.use(
     '/ai',

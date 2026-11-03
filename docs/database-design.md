@@ -890,6 +890,40 @@ Suggestions the person declined: `kind` (`category` | `merchant` | `recurring_ca
 format), and `value` (e.g. the rejected category id; empty otherwise), unique per
 `(user_id, kind, subject_key, value)`, so dismissing twice is harmless.
 
+## 3i. Financial intelligence (Phase 11)
+
+Migration `20261103090000_financial_intelligence` is additive: one new table and one widened CHECK.
+No existing row changes. Forecasts, predictions, suggestions, projections, indicators, and
+recommendations are **never stored** — they are recalculated from the ledger on every request and
+carry `calculatedAt` and a methodology version, so a stale result can never be shown as current.
+Methods are in [architecture.md §20](./architecture.md#20-financial-intelligence-phase-11).
+
+### `financial_scenarios`
+
+A saved what-if scenario: `name` (1–80, CHECK not blank), `currency` (`CHAR(3)`), `horizon_days`
+(CHECK 30, 60, 90, 180, or 365), and `assumptions` (JSONB, CHECK an array; at most ten
+adjustments, enforced and re-validated against `scenarioAdjustmentDtoSchema` on every read). Owned by one user
+(`ON DELETE CASCADE`), indexed `(user_id, updated_at DESC)` for the paginated list; at most 50 per
+user (checked under a per-user advisory lock). Only assumptions are stored — no transactions,
+balances, or results; identifiers in them (category, schedule, goal) are re-checked against the
+owner's records on every run, and a change whose subject was archived is reported as not applied.
+
+### `ai_dismissals` — recommendations
+
+The `kind` CHECK now also allows `recommendation`, with `value` `dismissed` or `reviewed` and
+`subject_key` the recommendation's deterministic key (which includes its period or subject, e.g.
+`shortfall:INR:2026-11`, `overspend:<budget>:<period start>`). A dismissed key is hidden until the
+subject changes and a new key is produced.
+
+### What counts (unchanged definitions, reused)
+
+Income and spending are the dashboard's `cashFlowScope`: active (not voided) `income` and `expense`
+transactions of the owner in one currency — transfers and balance adjustments never count; card
+purchases are spending. Categories roll up to their top-level parent; archived categories keep their
+history. A transaction is "scheduled" when a `scheduled_occurrences` row links it (unique
+`transaction_id`), which is how recorded bills are kept out of the everyday-spending baseline.
+Calendar months are `date_trunc('month', occurred_at AT TIME ZONE <user zone>)`.
+
 ## 4. Integrity rules
 
 ### Constraints

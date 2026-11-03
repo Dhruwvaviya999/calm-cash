@@ -131,6 +131,7 @@ export const assistantLinkTargetSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('subscriptions') }),
   z.strictObject({ kind: z.literal('goals') }),
   z.strictObject({ kind: z.literal('insights') }),
+  z.strictObject({ kind: z.literal('scenarios') }),
 ]) satisfies z.ZodType<AssistantLinkTarget>;
 
 export const assistantLinkDtoSchema = z.object({

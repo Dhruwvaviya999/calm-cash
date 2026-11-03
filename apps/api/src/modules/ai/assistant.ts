@@ -51,6 +51,7 @@ export const SUGGESTED_QUESTIONS = [
   'Am I over budget anywhere?',
   'Which subscriptions cost me the most?',
   'What payments are coming up?',
+  'How much might I have at the end of this month?',
 ] as const;
 
 export interface AssistantTurn {
@@ -70,7 +71,8 @@ function planPrompt(caller: Caller, today: string, context: ToolContext): string
     'You plan how to answer a question in CalmCash, a personal finance app, using only these read-only tools:',
     tools,
     `Today is ${today} in the user's time zone (${caller.timeZone}). Their main currency is ${caller.preferredCurrency}.`,
-    'Choose at most 3 tool calls. Fill only fields the tool needs and leave the rest null. Copy category, account, and merchant names as the user wrote them.',
+    'Choose at most 3 tool calls. Fill only fields the tool needs and leave the rest null. Copy category, account, goal, scenario, and merchant names as the user wrote them, and copy any percentage exactly as written.',
+    'Questions about the future, what might happen, or "what if" use the estimate tools (getCashFlowForecast, getCategorySpendingForecast, getSavingsGoalProjection, runFinancialScenario); their results are estimates.',
     `Account names: ${context.refs.accounts.map((account) => neutralize(account.name, 40)).join(', ') || 'none'}.`,
     "You cannot change data, move money, read files, settings, passwords, or other users' records, or run SQL — such requests are unsupported.",
     DATA_RULES,
@@ -198,7 +200,7 @@ export async function answerQuestion(
   const outcomes: ToolOutcome[] = [];
   for (const call of calls) {
     try {
-      outcomes.push(await runTool(call, context));
+      outcomes.push(await runTool(call, { ...context, question }));
     } catch (error: unknown) {
       // A bad argument (e.g. an impossible period) is reported, never retried with other data.
       if (error instanceof AppError && error.statusCode < 500) {

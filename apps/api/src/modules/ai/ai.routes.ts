@@ -4,6 +4,7 @@ import {
   dismissSuggestionInputSchema,
   entityIdSchema,
   explainInsightInputSchema,
+  intelligenceExplanationInputSchema,
   financialReportInputSchema,
   merchantRuleInputSchema,
   rejectSuggestionInputSchema,
@@ -90,6 +91,7 @@ function aiRateLimit(rule: AiRateRule, userIdOf: (req: Request) => string): Requ
  * POST   /search-interpretations         filters from a question (model)
  * POST   /reports                        an on-demand report
  * POST   /insight-explanations           plain words for one insight
+ * POST   /intelligence-explanations      plain words for a forecast, projection, or scenario
  */
 export function createAiRouter(service: AiService, auth: AuthBoundary, rule: AiRateRule): Router {
   const router = Router();
@@ -287,6 +289,16 @@ export function createAiRouter(service: AiService, auth: AuthBoundary, rule: AiR
       z.object({ body: explainInsightInputSchema }),
       async ({ body }, req, res: Reply<'explainInsight'>) => {
         sendSuccess(res, await service.explainInsight(caller(req), body));
+      },
+    ),
+  );
+  router.post(
+    '/intelligence-explanations',
+    limit,
+    validateRequest(
+      z.object({ body: intelligenceExplanationInputSchema }),
+      async ({ body }, req, res: Reply<'explainIntelligence'>) => {
+        sendSuccess(res, await service.explainIntelligence(caller(req), body));
       },
     ),
   );

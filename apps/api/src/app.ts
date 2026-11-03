@@ -24,6 +24,7 @@ import type { GoalsModuleDependencies } from './modules/goals/goals.routes';
 import type { ImportsModuleDependencies } from './modules/imports/imports.routes';
 import type { NotificationsModuleDependencies } from './modules/notifications';
 import type { AiModuleDependencies, InsightsModuleDependencies } from './modules/ai/ai.module';
+import type { IntelligenceModuleDependencies } from './modules/intelligence/intelligence.routes';
 import type { ReceiptsModuleDependencies } from './modules/receipts/receipts.routes';
 import type { RecurringModuleDependencies } from './modules/recurring';
 import type { TagsModuleDependencies } from './modules/tags/tags.routes';
@@ -51,6 +52,7 @@ export interface AppDependencies {
   notifications: NotificationsModuleDependencies;
   ai: AiModuleDependencies;
   insights: InsightsModuleDependencies;
+  intelligence: IntelligenceModuleDependencies;
 }
 
 /**
@@ -76,6 +78,7 @@ export function createApp({
   notifications,
   ai,
   insights,
+  intelligence,
 }: AppDependencies): Express {
   const app = express();
 
@@ -123,6 +126,7 @@ export function createApp({
       notifications,
       ai,
       insights,
+      intelligence,
       authConfig: { session: config.session, webAppUrl: config.webAppUrl },
     }),
   );

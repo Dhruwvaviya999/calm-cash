@@ -78,7 +78,8 @@ export type AssistantLinkTarget =
   | { kind: 'recurring' }
   | { kind: 'subscriptions' }
   | { kind: 'goals' }
-  | { kind: 'insights' };
+  | { kind: 'insights' }
+  | { kind: 'scenarios' };
 
 export interface AssistantLinkDto {
   label: string;

@@ -30,6 +30,7 @@ import {
   buildUpdateBudgetInput,
   emptyBudgetFormValues,
   type BudgetFormField,
+  type BudgetFormValues,
 } from '../budget-form-model';
 import { PERIOD_OPTION_LABELS } from '../budget-presentation';
 
@@ -42,6 +43,11 @@ export interface BudgetFormProps {
   timeZone: string;
   onSaved: (item: BudgetWithProgressDto) => void;
   onCancel: () => void;
+  /**
+   * Values to start from instead of the defaults or the saved budget (e.g. a suggested limit from
+   * Insights). Nothing is saved until the person submits the form.
+   */
+  initialValues?: Partial<BudgetFormValues> | undefined;
 }
 
 const SCOPES = [
@@ -60,13 +66,15 @@ export function BudgetForm({
   timeZone,
   onSaved,
   onCancel,
+  initialValues,
 }: BudgetFormProps): ReactNode {
   const editing = mode.kind === 'edit' ? mode.item : undefined;
-  const form = useFormFields(
-    editing === undefined
+  const form = useFormFields({
+    ...(editing === undefined
       ? emptyBudgetFormValues(defaultCurrency, timeZone)
-      : budgetToFormValues(editing.budget),
-  );
+      : budgetToFormValues(editing.budget)),
+    ...initialValues,
+  });
   const [submitting, setSubmitting] = useState(false);
   const [failure, setFailure] = useState<string | undefined>();
   const [showMore, setShowMore] = useState(editing !== undefined);

@@ -44,6 +44,18 @@ export function isGrounded(wording: string, facts: GroundingFacts): boolean {
   return numbersIn(wording).every((number) => allowed.has(number));
 }
 
+/**
+ * Wording that promises an outcome, presents an estimate as certain, or gives investment advice.
+ * Such wording is never shown (the fixed template is used instead): CalmCash's estimates are
+ * estimates, and it gives no investment, tax, or credit advice.
+ */
+const UNSUPPORTED_CLAIM =
+  /\b(guarantee[ds]?|guaranteed|certainly will|will definitely|definitely will|for sure|risk[- ]free|no risk|you should invest|invest in|buy (?:stocks?|shares|crypto|bitcoin)|credit score|tax[- ]free)\b/i;
+
+export function makesUnsupportedClaim(wording: string): boolean {
+  return UNSUPPORTED_CLAIM.test(wording);
+}
+
 /** A small, safe Markdown subset: no HTML, no links, no images, bounded length. */
 export function sanitizeWording(text: string, maxChars: number): string {
   const cleaned = text

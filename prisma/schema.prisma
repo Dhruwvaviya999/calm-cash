@@ -251,6 +251,7 @@ model User {
   aiMessages           AiMessage[]
   aiMerchantRules      AiMerchantRule[]
   aiDismissals         AiDismissal[]
+  financialScenarios   FinancialScenario[]
 
   @@map("users")
 }
@@ -886,7 +887,9 @@ model AiMerchantRule {
 }
 
 /// Something the person rejected or dismissed (a category for a transaction, a merchant
-/// suggestion, a recurring candidate, an insight), so it is not offered again unchanged.
+/// suggestion, a recurring candidate, an insight), so it is not offered again unchanged. Since
+/// Phase 11 also a financial recommendation the person dismissed (`value` = `dismissed`) or marked
+/// as reviewed (`value` = `reviewed`).
 model AiDismissal {
   id         String   @id @default(uuid(7)) @db.Uuid
   userId     String   @map("user_id") @db.Uuid
@@ -899,4 +902,25 @@ model AiDismissal {
 
   @@unique([userId, kind, subjectKey, value])
   @@map("ai_dismissals")
+}
+
+/// A what-if scenario (Phase 11): the person's hypothetical assumptions only. Results are
+/// recalculated from the ledger every time it runs and are never stored, so an old result can
+/// never be shown as current. Nothing here is a transaction, schedule, budget, or contribution.
+model FinancialScenario {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  name        String   @db.VarChar(80)
+  currency    String   @db.Char(3)
+  /// 30, 60, 90, 180, or 365 (CHECK constraint).
+  horizonDays Int      @map("horizon_days")
+  /// Validated scenario adjustments (Zod on every read); identifiers are re-checked on every run.
+  assumptions Json     @default("[]")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, updatedAt(sort: Desc)])
+  @@map("financial_scenarios")
 }

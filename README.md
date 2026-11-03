@@ -3,7 +3,15 @@
 CalmCash is an AI-powered personal finance tracker. The roadmap covers transaction management,
 budgeting, bank statement imports, financial analytics, AI insights, and recurring payments.
 
-> **Status — Phase 10 (AI-powered financial intelligence) complete.** On top of Phases 1–9
+> **Status — Phase 11 (advanced financial intelligence) complete.** CalmCash now forecasts cash
+> flow for the next 7–90 days from balances, confirmed schedules, and typical spending; predicts
+> category spending; suggests budget limits from history; projects savings goals; shows explainable
+> health indicators (no opaque score) and evidence-backed recommendations; and runs what-if scenarios
+> that never change a record. Every figure is calculated deterministically and labelled actual,
+> scheduled, estimated, or simulated; the local assistant can explain them but never produces them.
+> See [architecture §20](docs/architecture.md#20-financial-intelligence-phase-11).
+>
+> **Phase 10 (AI-powered financial intelligence).** On top of Phases 1–9
 > (foundation through notifications and the background worker), CalmCash has a financial assistant
 > that answers questions about the person's own records, rule-based spending insights, possible
 > bills and subscriptions, category and merchant suggestions, transaction drafts from plain words,
@@ -42,7 +50,7 @@ calmcash/
 │   │       ├── middleware/  Request logging, validation, 404, error handler
 │   │       ├── modules/     Feature modules (health, auth, accounts, transactions, categories, tags,
 │   │       │                dashboard, budgets, recurring, subscriptions, goals, imports,
-│   │       │                receipts, notifications)
+│   │       │                receipts, notifications, ai, insights, intelligence)
 │   │       ├── automation/  Worker engine: jobs, scheduler, alerts, reminders, summaries, e-mail
 │   │       └── routes/      Versioned routers (/api/v1)
 │   ├── worker/              Background worker process (TypeScript): main.ts, cli.ts, health

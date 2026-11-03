@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { isGrounded, sanitizeWording } from './grounding';
+import { isGrounded, makesUnsupportedClaim, sanitizeWording } from './grounding';
 import { DATA_RULES, dataBlock } from './prompting';
 import { AiUnavailableError, type AiProvider } from './provider/ai-provider';
 import { generateStructured } from './provider/structured';
@@ -38,6 +38,7 @@ export const NARRATION_RULES = [
   'Mention the period and currency the figures cover.',
   'A change in recorded amounts does not tell why it changed: never invent reasons.',
   'An unusual payment is not evidence of fraud.',
+  'Projections, estimates, and simulations are not certain: call them estimates and never promise an outcome. Keep actual, scheduled, and estimated figures apart.',
   'No investment, tax, or legal advice. Plain text, no links, no HTML.',
 ].join(' ');
 
@@ -61,12 +62,16 @@ export async function narrate(
     });
     const text = sanitizeWording(result.answer, 1_200);
     const grounding = { factTexts: facts, question };
-    if (text === '' || !isGrounded(text, grounding)) return fallback;
+    if (text === '' || !isGrounded(text, grounding) || makesUnsupportedClaim(text)) {
+      return fallback;
+    }
     return {
       text,
       followUps: result.followUps
         .map((item) => sanitizeWording(item, 120))
-        .filter((item) => item !== '' && isGrounded(item, grounding))
+        .filter(
+          (item) => item !== '' && isGrounded(item, grounding) && !makesUnsupportedClaim(item),
+        )
         .slice(0, 3),
       source: 'assistant',
     };

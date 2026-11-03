@@ -189,23 +189,24 @@ still prerenders).
 
 ## 7. Routes
 
-| Route              | Content in Phase 2                                                                                                                                                            |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/`                | Temporary (307) redirect to `/dashboard` (which sends signed-out visitors to `/login`).                                                                                       |
-| `/dashboard`       | **Live data** (§7c). Position, period summary, cash-flow trend, spending by category, recent activity; `?period=`, `?from=&to=`, `?currency=` in the URL.                     |
-| `/transactions`    | **Live data** (§7b). Record, search, filter, edit, void, restore, bulk-edit, and reconcile; filters in the URL; `?reconcile=<id>`, `?new=1`, `?transaction=<id>` open sheets. |
-| `/imports`         | **Live data** (§7e). Upload a CSV statement, import history; `?batch=<id>&step=map\|review\|reconcile` resumes one import.                                                    |
-| `/budgets`         | **Live data** (§7d). Budgets & planning: `?section=budgets` (default), `recurring`, `subscriptions`, `goals`.                                                                 |
-| `/accounts`        | **Live data.** Totals per currency (held vs. owed), accounts grouped by classification, active/archived filter, add/edit sheet, details sheet, archive and restore.           |
-| `/insights`        | **Live data** (§7g). Spending patterns (with period in the URL), possible bills and subscriptions, category and merchant suggestions, and reports.                            |
-| `/assistant`       | **Live data** (§7g). The financial assistant; `?c=<id>` opens a conversation.                                                                                                 |
-| `/settings`        | Profile (name, currency, time zone), password change, signed-in devices, notifications, AI & privacy (`#ai`), theme, preference reset, diagnostics.                           |
-| `/login`           | Sign in; notices after sign-out or an ended session; resend link for unconfirmed addresses.                                                                                   |
-| `/register`        | Create an account with live password guidance; ends on a "check your inbox" confirmation.                                                                                     |
-| `/forgot-password` | Request a reset link; the confirmation never reveals whether an account exists.                                                                                               |
-| `/reset-password`  | Choose a new password from an e-mailed link; handles incomplete, expired, and used links.                                                                                     |
-| `/verify-email`    | Consumes the confirmation link; offers a new link when it cannot be used.                                                                                                     |
-| unknown URLs       | Branded 404 (HTTP 404).                                                                                                                                                       |
+| Route              | Content in Phase 2                                                                                                                                                                                     |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/`                | Temporary (307) redirect to `/dashboard` (which sends signed-out visitors to `/login`).                                                                                                                |
+| `/dashboard`       | **Live data** (§7c). Position, period summary, cash-flow trend, spending by category, recent activity; `?period=`, `?from=&to=`, `?currency=` in the URL.                                              |
+| `/transactions`    | **Live data** (§7b). Record, search, filter, edit, void, restore, bulk-edit, and reconcile; filters in the URL; `?reconcile=<id>`, `?new=1`, `?transaction=<id>` open sheets.                          |
+| `/imports`         | **Live data** (§7e). Upload a CSV statement, import history; `?batch=<id>&step=map\|review\|reconcile` resumes one import.                                                                             |
+| `/budgets`         | **Live data** (§7d). Budgets & planning: `?section=budgets` (default), `recurring`, `subscriptions`, `goals`.                                                                                          |
+| `/accounts`        | **Live data.** Totals per currency (held vs. owed), accounts grouped by classification, active/archived filter, add/edit sheet, details sheet, archive and restore.                                    |
+| `/insights`        | **Live data** (§7g, §7h). Tabs `?tab=overview\|forecast\|spending\|planning\|more` and `?currency=`: overview, health, recommendations, forecasts, trends, budget and goal planning, tidy-up, reports. |
+| `/scenarios`       | **Live data** (§7h). What-if scenarios: build, run, save, compare, delete (never changes records).                                                                                                     |
+| `/assistant`       | **Live data** (§7g). The financial assistant; `?c=<id>` opens a conversation.                                                                                                                          |
+| `/settings`        | Profile (name, currency, time zone), password change, signed-in devices, notifications, AI & privacy (`#ai`), theme, preference reset, diagnostics.                                                    |
+| `/login`           | Sign in; notices after sign-out or an ended session; resend link for unconfirmed addresses.                                                                                                            |
+| `/register`        | Create an account with live password guidance; ends on a "check your inbox" confirmation.                                                                                                              |
+| `/forgot-password` | Request a reset link; the confirmation never reveals whether an account exists.                                                                                                                        |
+| `/reset-password`  | Choose a new password from an e-mailed link; handles incomplete, expired, and used links.                                                                                                              |
+| `/verify-email`    | Consumes the confirmation link; offers a new link when it cannot be used.                                                                                                                              |
+| unknown URLs       | Branded 404 (HTTP 404).                                                                                                                                                                                |
 
 All routes are statically prerendered. Every route in the `(app)` group requires a signed-in user;
 the `(auth)` pages are public, and `/login` and `/register` send signed-in users on to the app.
@@ -465,6 +466,37 @@ the `(auth)` pages are public, and `/login` and `/register` send signed-in users
 - **Settings → AI & privacy** (`#ai`): status, model, last answer, the "Use AI features" switch
   (disabled when the installation has AI off), what the model sees and never sees, delete all
   conversations (confirmed), and the person's merchant rules with delete.
+
+## 7h. Financial intelligence (Phase 11)
+
+- **Insights tabs** (`features/insights/components/insights-page`, `SectionTabs` links so a tab
+  survives refresh): **Overview** (actual figures for this month and money held/owed; recommendations
+  with "What the records show" / "You could consider", Mark as reviewed, Dismiss, and "Open the
+  budget form"; health indicators grouped by area, each with its definition, period, and values — no
+  score), **Forecasts** (cash-flow forecast with 7/30/60/90 days and an opt-in for unscheduled income;
+  category predictions for this or next month), **Spending** (trends for preset or custom periods:
+  distribution, categories, merchants, weekdays; then the Phase 10 unusual-activity insights),
+  **Budgets & goals** (suggested limits and budget performance; goal projections), **Tidy up &
+  reports** (the Phase 10 tools). A currency switch appears when the person uses several.
+- **Actual vs. projected.** Every figure carries a `FigureKindLabel`: Actual (solid), Scheduled
+  (accent), Estimate and Simulation (dashed outline). Charts draw projections as dashed lines and
+  estimated remainders as dashed, light segments, with a legend, tooltips stating "Projected — an
+  estimate", and a "Show as table" view. One money axis per chart; existing chart tokens
+  (`--chart-income`, `--chart-expense`, `--chart-2`) in both themes.
+- **Methodology and sufficiency.** Each section shows a sufficiency badge with its measured facts,
+  the warnings, a "How this is calculated" disclosure (the API's methodology), and when it was
+  calculated. "Explain in plain words" appears only while AI is available; it shows the API's
+  wording and whether the assistant or the standard wording produced it.
+- **Budget prefill.** "Create/Edit with this limit" and "Open the budget form" open the ordinary
+  Phase 7 `BudgetForm` in a side sheet through its new `initialValues` prop (editing loads the budget
+  first). Nothing is saved until the person presses Save.
+- **Scenarios** (`/scenarios`, Overview navigation, mobile "More"): saved list with compare (two or
+  three) and delete (confirmed); the builder (name, currency, look-ahead, up to ten changes chosen
+  from plain-language kinds; percentages and amounts parsed exactly by `scenario-form-model.ts` with
+  the shared schema); "Run simulation" (unsaved preview) and "Save"; results labelled "Simulation —
+  nothing was changed", with the difference in neutral ink (a hypothetical improvement is not shown as
+  a success), a two-line chart, each change's effect or why it was not applied, goal and budget
+  impacts, assumptions and limitations, and the recalculation policy.
 
 ## 8. Prototype data rules
 
