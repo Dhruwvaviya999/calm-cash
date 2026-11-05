@@ -924,6 +924,26 @@ history. A transaction is "scheduled" when a `scheduled_occurrences` row links i
 `transaction_id`), which is how recorded bills are kept out of the everyday-spending baseline.
 Calendar months are `date_trunc('month', occurred_at AT TIME ZONE <user zone>)`.
 
+## 3j. Production readiness (Phase 12)
+
+**`rate_limit_counters`** (migration `20261104090000_shared_rate_limits`) — one fixed-window counter
+per limiter and subject, shared by all API instances.
+
+| Column     | Type             | Notes                                                                                  |
+| ---------- | ---------------- | -------------------------------------------------------------------------------------- |
+| `key`      | `CHAR(64)` PK    | SHA-256 hex of limiter name + subject (CHECK `^[0-9a-f]{64}$`); no e-mail or IP stored |
+| `hits`     | `INTEGER`        | CHECK `hits >= 0`                                                                      |
+| `reset_at` | `TIMESTAMPTZ(3)` | window end (database clock); indexed for cleanup                                       |
+
+Each hit is one `INSERT … ON CONFLICT (key) DO UPDATE` that restarts an expired window or adds one,
+so concurrent requests count exactly. Worker maintenance deletes rows a day after `reset_at`.
+
+**Settling an occurrence with an existing transaction.** No schema change: the existing
+`scheduled_occurrences.transaction_id` (UNIQUE) now may also point at a transaction recorded
+elsewhere (typed in or imported). The service locks the schedule, then the transaction
+(`FOR UPDATE`), and requires the same owner, an active transaction of the schedule's type and
+currency, a date within 45 days of the scheduled/due date, and no other occurrence settled by it.
+
 ## 4. Integrity rules
 
 ### Constraints

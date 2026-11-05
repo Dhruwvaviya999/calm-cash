@@ -20,11 +20,13 @@ import type { AuthModuleDependencies } from './modules/auth/auth.routes';
 import type { BudgetsModuleDependencies } from './modules/budgets/budgets.routes';
 import type { CategoriesModuleDependencies } from './modules/categories/categories.routes';
 import type { DashboardModuleDependencies } from './modules/dashboard/dashboard.routes';
+import type { DataExportModuleDependencies } from './modules/data-export/data-export.routes';
 import type { GoalsModuleDependencies } from './modules/goals/goals.routes';
 import type { ImportsModuleDependencies } from './modules/imports/imports.routes';
 import type { NotificationsModuleDependencies } from './modules/notifications';
 import type { AiModuleDependencies, InsightsModuleDependencies } from './modules/ai/ai.module';
 import type { IntelligenceModuleDependencies } from './modules/intelligence/intelligence.routes';
+import type { OperationsStatusReader } from './modules/health/operations-status';
 import type { ReceiptsModuleDependencies } from './modules/receipts/receipts.routes';
 import type { RecurringModuleDependencies } from './modules/recurring';
 import type { TagsModuleDependencies } from './modules/tags/tags.routes';
@@ -38,6 +40,8 @@ export interface AppDependencies {
   >;
   logger: Logger;
   checkDatabase: DatabaseHealthCheck;
+  /** Operator status endpoint; omitted unless OPS_STATUS_TOKEN is configured. */
+  operationsStatus?: { token: string; read: OperationsStatusReader };
   auth: AuthModuleDependencies;
   accounts: AccountsModuleDependencies;
   transactions: TransactionsModuleDependencies;
@@ -53,6 +57,8 @@ export interface AppDependencies {
   ai: AiModuleDependencies;
   insights: InsightsModuleDependencies;
   intelligence: IntelligenceModuleDependencies;
+  /** The person's own records as a download; omitted in database-free unit tests. */
+  dataExport?: DataExportModuleDependencies;
 }
 
 /**
@@ -64,6 +70,7 @@ export function createApp({
   config,
   logger,
   checkDatabase,
+  operationsStatus,
   auth,
   accounts,
   transactions,
@@ -79,6 +86,7 @@ export function createApp({
   ai,
   insights,
   intelligence,
+  dataExport,
 }: AppDependencies): Express {
   const app = express();
 
@@ -106,11 +114,18 @@ export function createApp({
   );
   app.use(createOriginCheck(config.corsOrigins));
   app.use(express.json({ limit: config.jsonBodyLimit }));
+  // Defence in depth: API responses are personal, so none may be stored by a browser, proxy, or
+  // CDN. Routes set the same header themselves; this also covers 404s and errors.
+  app.use(API_V1_PREFIX, (_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+  });
 
   app.use(
     API_V1_PREFIX,
     createV1Router({
       checkDatabase,
+      ...(operationsStatus === undefined ? {} : { operationsStatus }),
       logger,
       auth,
       accounts,
@@ -127,6 +142,7 @@ export function createApp({
       ai,
       insights,
       intelligence,
+      ...(dataExport === undefined ? {} : { dataExport }),
       authConfig: { session: config.session, webAppUrl: config.webAppUrl },
     }),
   );

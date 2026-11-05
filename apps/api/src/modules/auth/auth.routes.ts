@@ -17,6 +17,7 @@ import type { SessionConfig } from '../../config/env';
 import type { Caller } from '../../lib/auth-boundary';
 import type { BackgroundTasks } from '../../lib/background-tasks';
 import type { EmailService } from '../../lib/email';
+import type { RateLimitStoreFactory } from '../../lib/rate-limit';
 import { validateRequest } from '../../middleware/validate-request';
 import { createAuthController } from './auth.controller';
 import { createRequireCsrf, createRequireSession, getAuthContext } from './auth.middleware';
@@ -37,6 +38,8 @@ export interface AuthModuleDependencies {
   /** Injectable clock for deterministic expiry tests. */
   now?: () => Date;
   rateLimits?: Readonly<AuthRateLimits>;
+  /** Shared counter store for the rate limits (in memory when omitted). */
+  rateLimitStore?: RateLimitStoreFactory;
 }
 
 export interface AuthModuleConfig {
@@ -82,7 +85,10 @@ export function createAuthModule(
     now,
   });
   const controller = createAuthController(service, config.session, now);
-  const limiters = createAuthRateLimiters(dependencies.rateLimits ?? DEFAULT_AUTH_RATE_LIMITS);
+  const limiters = createAuthRateLimiters(
+    dependencies.rateLimits ?? DEFAULT_AUTH_RATE_LIMITS,
+    dependencies.rateLimitStore,
+  );
   const requireSession = createRequireSession(service, config.session);
   const requireCsrf = createRequireCsrf(service);
 

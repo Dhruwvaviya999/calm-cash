@@ -498,6 +498,23 @@ the `(auth)` pages are public, and `/login` and `/register` send signed-in users
   a success), a two-line chart, each change's effect or why it was not applied, goal and budget
   impacts, assumptions and limitations, and the recalculation policy.
 
+## 7i. Installable app and data (Phase 12)
+
+- **Root layout** adds `ConnectionStatus` (a sticky warning banner while the device is offline:
+  figures may be out of date, nothing can be saved) and `ServiceWorkerManager` (registers
+  `/sw.js` in production, checks for new versions on focus and every 30 minutes, and shows "A new
+  version of CalmCash is ready · Reload now" above the mobile tab bar — it never reloads by
+  itself, so unfinished forms survive).
+- **`/offline`** — static page the service worker shows when a page cannot be reached: status,
+  "Try again", link to the dashboard, no figures.
+- **Settings** gains _Your data_ (Download my data — JSON export) and _Install the app_ (the
+  browser's install dialog where offered, otherwise platform-specific steps; nothing when already
+  installed). The app never prompts to install on its own.
+- **Record payment sheet** starts with _Already recorded this payment?_: matching transactions
+  (closest amount, then date) with "Use this"; choosing one settles the bill without recording a
+  new transaction. The panel stays hidden when nothing matches or the lookup fails.
+- Manifest and icons are generated from the brand mark (`apps/web/scripts/generate-app-icons.mjs`).
+
 ## 8. Prototype data rules
 
 - Since Phase 7 no sample data remains: the Budgets preview was the last user of

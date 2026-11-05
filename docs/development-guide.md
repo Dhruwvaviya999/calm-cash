@@ -72,19 +72,20 @@ The placeholder values in `.env.example` work as-is for local development. Chang
 
 All commands run from the repository root.
 
-| Command                 | What it does                                                                      |
-| ----------------------- | --------------------------------------------------------------------------------- |
-| `pnpm dev`              | Runs the API (`:4000`), the web app (`:3000`), and the worker, all in watch mode. |
-| `pnpm dev:worker`       | Runs only the background worker (watch mode).                                     |
-| `pnpm worker:start`     | Runs the built worker (`apps/worker/dist/main.js`).                               |
-| `pnpm worker:status`    | Prints job and e-mail queue counts and recently seen workers.                     |
-| `pnpm build`            | Production builds: `apps/api/dist/server.js` (tsup) and `apps/web/.next` (Next).  |
-| `pnpm lint`             | ESLint across the workspace; warnings fail the run.                               |
-| `pnpm typecheck`        | `tsc` for root tooling, the shared package, the API, and the web app.             |
-| `pnpm test`             | Vitest suites of all packages (no database needed).                               |
-| `pnpm test:integration` | API integration tests against the `TEST_DATABASE_URL` database.                   |
-| `pnpm format`           | Formats all files with Prettier.                                                  |
-| `pnpm format:check`     | Verifies formatting without writing (use in CI).                                  |
+| Command                 | What it does                                                                                                                                                     |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm dev`              | Runs the API (`:4000`), the web app (`:3000`), and the worker, all in watch mode.                                                                                |
+| `pnpm dev:worker`       | Runs only the background worker (watch mode).                                                                                                                    |
+| `pnpm worker:start`     | Runs the built worker (`apps/worker/dist/main.js`).                                                                                                              |
+| `pnpm worker:status`    | Prints job and e-mail queue counts and recently seen workers.                                                                                                    |
+| `pnpm build`            | Production builds: `apps/api/dist/server.js` (tsup) and `apps/web/.next` (Next).                                                                                 |
+| `pnpm lint`             | Type-aware ESLint across the workspace in one process with a 4 GB heap (≈70 s on an 8 GB machine); warnings fail the run.                                        |
+| `pnpm typecheck`        | `tsc` for root tooling, the shared package, the API, and the web app.                                                                                            |
+| `pnpm test`             | Vitest suites of all packages (no database needed).                                                                                                              |
+| `pnpm test:integration` | API integration tests against the `TEST_DATABASE_URL` database.                                                                                                  |
+| `pnpm format`           | Formats all files with Prettier.                                                                                                                                 |
+| `pnpm format:check`     | Verifies formatting without writing (use in CI).                                                                                                                 |
+| `pnpm check:artifacts`  | After `pnpm build`: bundle imports are declared dependencies, browser assets hold no secrets (`-- --production` also refuses localhost origins and source maps). |
 
 Run a script for one package with `--filter`:
 
@@ -116,6 +117,20 @@ pnpm --filter @calmcash/worker requeue-failed <id>    # retry a failed job after
 
 Failed jobs and e-mails keep a short `last_error_code` (never a message) in `automation_jobs` and
 `notification_deliveries`; look there first when something did not arrive.
+
+**Operations tooling (Phase 12)** — each refuses to touch the wrong database:
+
+```bash
+pnpm --filter @calmcash/api receipts:audit                   # receipt files vs rows (report only)
+pnpm --filter @calmcash/api receipts:audit --delete-orphans  # remove unreferenced files older than 24 h
+SYNTHETIC_DATABASE_URL=postgresql://…/calmcash_perf pnpm --filter @calmcash/api seed:synthetic
+SOURCE_DATABASE_URL=… DRILL_DATABASE_URL=…/calmcash_restore_drill   PG_DOCKER_CONTAINER=calmcash-postgres-1 bash scripts/restore-drill.sh
+docker build -f Dockerfile.api -t calmcash-api .              # production images (repository root)
+docker build -f Dockerfile.worker -t calmcash-worker .
+```
+
+The vendored agent skills (`.agents/`, `.claude/skills/`, `.windsurf/`, pinned by
+`skills-lock.json`) are third-party files and are excluded from Prettier.
 
 ## 4. Database
 

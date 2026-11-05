@@ -49,6 +49,11 @@ export interface DeliveryStore {
     now: Date,
   ) => Promise<boolean>;
   /**
+   * Hands back a claimed delivery this worker never attempted (it is shutting down): due again at
+   * once with the claim's attempt returned. Nothing was sent, so the outcome stays certain.
+   */
+  release: (deliveryId: string, workerId: string, now: Date) => Promise<boolean>;
+  /**
    * Deliveries whose worker vanished mid-attempt. The mail server may have accepted the message,
    * so they are flagged `outcome_uncertain` before being retried (or failed when out of attempts).
    */
@@ -132,6 +137,18 @@ export function createPrismaDeliveryStore(prisma: PrismaClient): DeliveryStore {
                   delivery.user_id::text AS "userId", delivery.attempts AS "attempts",
                   delivery.max_attempts AS "maxAttempts", delivery.expires_at AS "expiresAt"`;
       return z.array(claimedRowSchema).parse(rows);
+    },
+
+    release: async (deliveryId, workerId, now) => {
+      const count = await prisma.$executeRaw`
+        UPDATE notification_deliveries
+        SET status = (CASE WHEN attempts > 1 THEN 'retry_scheduled' ELSE 'pending' END)::notification_delivery_status,
+            attempts = GREATEST(attempts - 1, 0),
+            locked_by = NULL,
+            locked_until = NULL,
+            updated_at = ${now}::timestamptz
+        WHERE id = ${deliveryId}::uuid AND status = 'processing' AND locked_by = ${workerId}`;
+      return count > 0;
     },
 
     markSent: (deliveryId, workerId, now) =>

@@ -1,0 +1,75 @@
+# Applies checked-in Prisma migrations to a deployed database. Manual only: it never runs on a
+# push or pull request. Each target is a GitHub Environment ("staging", "production") whose
+# protection rules should require a reviewer, and whose secrets hold that database's DIRECT
+# (non-pooled) connection URL as DIRECT_URL. Nothing here prints a connection string.
+#
+# Procedure and rollback/forward-fix rules: docs/system-design/runbooks.md#database-migrations.
+name: Database migration
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [staging, production]
+        required: true
+      backup_confirmed:
+        description: 'I confirmed a restorable backup (or a Neon restore point) from the last hour'
+        type: boolean
+        required: true
+      apply:
+        description: Apply pending migrations (unticked = status only)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: database-migrate-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: ${{ inputs.environment }}
+    env:
+      DIRECT_URL: ${{ secrets.DIRECT_URL }}
+    steps:
+      - name: Refuse without a confirmed backup
+        if: inputs.apply && !inputs.backup_confirmed
+        run: |
+          echo "::error::Confirm a restorable backup before applying migrations."
+          exit 1
+
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Identify the target database (without credentials)
+        run: |
+          test -n "$DIRECT_URL" || { echo "::error::DIRECT_URL is not set for this environment."; exit 1; }
+          node -e '
+            const u = new URL(process.env.DIRECT_URL);
+            if (/-pooler\./.test(u.hostname)) { console.error("Use the direct (non-pooled) URL for migrations."); process.exit(1); }
+            if (/_test$/.test(u.pathname)) { console.error("Refusing a *_test database."); process.exit(1); }
+            console.log(`target host: ${u.hostname.replace(/^([^.]{4})[^.]*/, "$1…")}  database: ${u.pathname.slice(1)}`);
+          '
+
+      - name: Migration status (before)
+        # Exit code 1 means pending migrations; that is what this workflow is for.
+        run: pnpm exec prisma migrate status || true
+
+      - name: Apply pending migrations
+        if: inputs.apply
+        run: pnpm db:deploy
+
+      - name: Migration status (after)
+        if: inputs.apply
+        run: pnpm exec prisma migrate status

@@ -1,18 +1,65 @@
-FROM node:24-bookworm-slim AS build
-WORKDIR /app
-RUN npm install --global pnpm@11.21.0
+# syntax=docker/dockerfile:1
+# CalmCash background worker. Build from the repository root (the bundle includes the API's
+# automation code and the shared package):
+#
+#   docker build -f Dockerfile.worker -t calmcash-worker .
+#
+# Used by the Vercel daemon in vercel.json and by any container host. Configuration comes only
+# from the environment at run time; .dockerignore keeps .env files, receipts, and build output out
+# of the build context, so no secret is ever baked into a layer.
 
-# The daemon needs the workspace root: its bundle imports API automation and shared contracts.
-# .dockerignore excludes credentials, receipt files, dependencies, and generated build output.
+ARG NODE_IMAGE=node:24-bookworm-slim
+
+FROM ${NODE_IMAGE} AS base
+ENV CI=true \
+    PNPM_HOME=/pnpm \
+    PATH=/pnpm:$PATH \
+    pnpm_config_store_dir=/pnpm/store \
+    pnpm_config_cache_dir=/pnpm/cache \
+    pnpm_config_fetch_timeout=300000
+RUN npm install --global pnpm@11.21.0 && npm cache clean --force
+WORKDIR /app
+
+# --- Build: full workspace for the worker and what it bundles ------------------------------------
+FROM base AS build
 COPY . .
-RUN pnpm install --frozen-lockfile --filter . --filter @calmcash/worker...
-RUN pnpm --filter @calmcash/worker build
+# The pnpm store and cache are BuildKit caches shared by both stages: packages are downloaded,
+# and the lockfile's supply-chain policy check is done, once.
+RUN --mount=type=cache,id=calmcash-pnpm,target=/pnpm/store \
+    --mount=type=cache,id=calmcash-pnpm-cache,target=/pnpm/cache \
+    pnpm install --frozen-lockfile --filter . --filter @calmcash/worker... \
+ && pnpm --filter @calmcash/worker build
 
-FROM node:24-bookworm-slim AS runtime
-WORKDIR /app
+# --- Production dependencies only (manifests and lockfile; no sources, no dev tools) -------------
+FROM base AS deps
+# Manifests come from the build stage, so this runs after it and reuses its downloads.
+COPY --from=build /app/pnpm-lock.yaml /app/pnpm-workspace.yaml /app/package.json ./
+COPY --from=build /app/apps/worker/package.json apps/worker/
+COPY --from=build /app/apps/api/package.json apps/api/
+COPY --from=build /app/packages/shared/package.json packages/shared/
+# Scripts are skipped: the generated Prisma client is compiled into the bundle, and the worker
+# loads no native add-on.
+RUN --mount=type=cache,id=calmcash-pnpm,target=/pnpm/store \
+    --mount=type=cache,id=calmcash-pnpm-cache,target=/pnpm/cache \
+    pnpm install --frozen-lockfile --prod --ignore-scripts --filter @calmcash/worker...
+
+# --- Runtime -------------------------------------------------------------------------------------
+FROM ${NODE_IMAGE} AS runtime
 ENV NODE_ENV=production \
     WORKER_HEALTH_HOST=0.0.0.0 \
     WORKER_HEALTH_PORT=8080
-COPY --from=build --chown=node:node /app /app
+WORKDIR /app
+COPY --from=deps --chown=node:node /app/node_modules ./node_modules
+COPY --from=deps --chown=node:node /app/apps/worker/node_modules ./apps/worker/node_modules
+COPY --from=build --chown=node:node /app/apps/worker/dist ./apps/worker/dist
+COPY --from=build --chown=node:node /app/apps/worker/package.json ./apps/worker/package.json
 USER node
+EXPOSE 8080
+# The worker answers 503 when its cycles stall; supervisors restart it.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:'+process.env.WORKER_HEALTH_PORT+'/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+# Exec form: node is PID 1 and receives SIGTERM/SIGINT directly. The worker handles both: it stops
+# claiming, finishes the item in progress, hands back the rest, and exits within
+# SHUTDOWN_TIMEOUT_MS. Give the platform a longer stop grace period than that value.
+STOPSIGNAL SIGTERM
 CMD ["node", "--enable-source-maps", "apps/worker/dist/main.js"]

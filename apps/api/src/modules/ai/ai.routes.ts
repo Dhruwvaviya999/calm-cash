@@ -14,17 +14,10 @@ import {
   transactionDraftInputSchema,
   updateAiPreferencesInputSchema,
 } from '@calmcash/shared';
-import {
-  Router,
-  type NextFunction,
-  type Request,
-  type RequestHandler,
-  type Response,
-} from 'express';
-import { rateLimit } from 'express-rate-limit';
+import { Router, type Response } from 'express';
 import { z } from 'zod';
 
-import { AppError } from '../../lib/app-error';
+import { createRateLimiter, type RateLimitStoreFactory } from '../../lib/rate-limit';
 import { noStore, type AuthBoundary } from '../../lib/auth-boundary';
 import { sendSuccess } from '../../lib/http-response';
 import { validateRequest } from '../../middleware/validate-request';
@@ -49,27 +42,6 @@ const entrySuggestionSchema = z.strictObject({
   merchant: z.string().trim().min(1).max(120).exactOptional(),
 });
 
-/** Model-backed requests per signed-in user (in memory, like the other per-user limits). */
-function aiRateLimit(rule: AiRateRule, userIdOf: (req: Request) => string): RequestHandler {
-  return rateLimit({
-    windowMs: rule.windowMs,
-    limit: rule.limit,
-    standardHeaders: 'draft-8',
-    legacyHeaders: false,
-    keyGenerator: (req: Request) => `ai:${userIdOf(req)}`,
-    handler: (_req: Request, res: Response, next: NextFunction) => {
-      res.setHeader('Retry-After', String(Math.ceil(rule.windowMs / 1000)));
-      next(
-        new AppError(
-          429,
-          'RATE_LIMITED',
-          'You have asked the assistant a lot recently. Please wait a few minutes.',
-        ),
-      );
-    },
-  });
-}
-
 /**
  * AI features. Every route requires a session; changes require the CSRF token; responses are
  * `no-store`. The owner always comes from the session. Requests that reach the model are rate
@@ -93,9 +65,21 @@ function aiRateLimit(rule: AiRateRule, userIdOf: (req: Request) => string): Requ
  * POST   /insight-explanations           plain words for one insight
  * POST   /intelligence-explanations      plain words for a forecast, projection, or scenario
  */
-export function createAiRouter(service: AiService, auth: AuthBoundary, rule: AiRateRule): Router {
+export function createAiRouter(
+  service: AiService,
+  auth: AuthBoundary,
+  rule: AiRateRule,
+  store?: RateLimitStoreFactory,
+): Router {
   const router = Router();
-  const limit = aiRateLimit(rule, (req) => auth.getCaller(req).userId);
+  // Model-backed requests per signed-in user.
+  const limit = createRateLimiter({
+    name: 'ai.model',
+    rule,
+    key: (req) => `ai:${auth.getCaller(req).userId}`,
+    message: 'You have asked the assistant a lot recently. Please wait a few minutes.',
+    ...(store === undefined ? {} : { store }),
+  });
   router.use(auth.requireSession, auth.requireCsrf, noStore);
   const caller = (req: object): ReturnType<AuthBoundary['getCaller']> => auth.getCaller(req);
 

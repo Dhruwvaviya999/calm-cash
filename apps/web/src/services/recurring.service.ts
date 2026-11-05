@@ -1,5 +1,6 @@
 import {
   occurrenceActionResultDtoSchema,
+  occurrenceLinkCandidatesDtoSchema,
   recordedOccurrenceDtoSchema,
   recurringScheduleDetailDtoSchema,
   recurringScheduleItemDtoSchema,
@@ -9,6 +10,7 @@ import {
   type EntityId,
   type IsoDateString,
   type OccurrenceActionResultDto,
+  type OccurrenceLinkCandidatesDto,
   type RecordedOccurrenceDto,
   type RecordOccurrenceInput,
   type RecurringScheduleDetailDto,
@@ -21,7 +23,8 @@ import {
 import { api } from '@/lib/api';
 
 // One function per recurring endpoint; every response is validated against the shared schema.
-// Schedules are plans: only `recordOccurrence` records a real transaction.
+// Schedules are plans: only `recordOccurrence` records a real transaction (`linkOccurrence` settles
+// a payment with a transaction that already exists, so it records nothing new).
 
 function schedulePath(scheduleId: EntityId): `/${string}` {
   return `/recurring/${encodeURIComponent(scheduleId)}`;
@@ -138,5 +141,30 @@ export function postponeOccurrence(
     schema: occurrenceActionResultDtoSchema,
     method: 'POST',
     body: { dueDate },
+  });
+}
+
+/** Existing transactions that could settle this payment, closest amount and date first. */
+export function getLinkCandidates(
+  scheduleId: EntityId,
+  date: IsoDateString,
+  signal?: AbortSignal,
+): Promise<OccurrenceLinkCandidatesDto> {
+  return api.request(occurrencePath(scheduleId, date, 'link-candidates'), {
+    schema: occurrenceLinkCandidatesDtoSchema,
+    signal,
+  });
+}
+
+/** Settles the payment with an existing transaction. Repeating it changes nothing. */
+export function linkOccurrence(
+  scheduleId: EntityId,
+  date: IsoDateString,
+  transactionId: EntityId,
+): Promise<RecordedOccurrenceDto> {
+  return api.request(occurrencePath(scheduleId, date, 'link'), {
+    schema: recordedOccurrenceDtoSchema,
+    method: 'POST',
+    body: { transactionId },
   });
 }

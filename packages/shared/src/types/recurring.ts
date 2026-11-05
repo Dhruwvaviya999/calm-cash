@@ -207,6 +207,20 @@ export interface RecordOccurrenceInput {
   tags?: string[];
 }
 
+/**
+ * Settles an occurrence with a transaction the person already recorded (e.g. an imported bank
+ * payment), instead of recording a second one. The transaction must be theirs, active, of the
+ * schedule's type and currency, near the due date, and not settle another occurrence.
+ */
+export interface LinkOccurrenceInput {
+  transactionId: EntityId;
+}
+
+/** Transactions that could settle an occurrence, closest match first. */
+export interface OccurrenceLinkCandidatesDto {
+  candidates: TransactionListItemDto[];
+}
+
 export interface PostponeOccurrenceInput {
   dueDate: IsoDateString;
 }

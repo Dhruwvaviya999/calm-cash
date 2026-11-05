@@ -133,7 +133,8 @@ consumed_at IS NULL AND expires_at > now` inside a transaction. PostgreSQL row l
 
 ## 6. Abuse prevention
 
-`express-rate-limit`, in-memory, one counter store per limiter (`auth.rate-limits.ts`):
+`express-rate-limit` with counters in PostgreSQL (`rate_limit_counters`, `lib/rate-limit.ts`), one
+named limiter per rule (`auth.rate-limits.ts`); unit tests use a memory store:
 
 | Endpoint                    | Limit                                                        |
 | --------------------------- | ------------------------------------------------------------ |
@@ -149,8 +150,11 @@ E-mail keys are normalised (trimmed, lower-cased), so spelling variants share a 
 sign-ins do not count. Exceeding a limit returns `429 RATE_LIMITED` with `Retry-After` and
 `RateLimit` headers.
 
-- **Multiple instances:** counters are per process. With N API instances the effective limit is N
-  times higher; use a shared store (e.g. Redis) before scaling out.
+- **Multiple instances:** counters are shared through PostgreSQL (Phase 12), so limits hold across
+  any number of API instances, restarts, and serverless cold starts. Keys are stored as SHA-256
+  hashes (no addresses or IPs at rest); the worker deletes expired counters. If the database is
+  unreachable the request fails rather than passing unlimited. See
+  [system-design/security.md](system-design/security.md#rate-limits--now-shared-across-instances).
 - **Proxies:** limits are keyed by `req.ip`. Behind a load balancer set `TRUST_PROXY_HOPS` to the
   number of proxies, or every client shares the proxy's IP.
 
@@ -209,7 +213,7 @@ variable name only — values (passwords, URLs) are never printed.
 3. Configure a real SMTP provider (`EMAIL_DELIVERY_MODE=smtp`, `SMTP_*`, `EMAIL_FROM` on a domain
    with SPF/DKIM/DMARC) for both the API and the worker.
 4. Run `pnpm db:deploy` before starting the new API version.
-5. Run a single API instance, or move rate limiting to a shared store first.
+5. Any number of API instances may run: rate limits are shared through PostgreSQL.
 
 ## 9. Local e-mail workflow
 

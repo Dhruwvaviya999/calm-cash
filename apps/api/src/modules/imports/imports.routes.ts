@@ -14,6 +14,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 
 import { noStore, type AuthBoundary } from '../../lib/auth-boundary';
+import type { RateLimitStoreFactory } from '../../lib/rate-limit';
 import {
   DEFAULT_UPLOAD_RATE,
   rawBody,
@@ -32,6 +33,8 @@ export interface ImportsModuleDependencies {
   /** Injectable clock for deterministic tests. */
   now?: () => Date;
   uploadRate?: UploadRateRule;
+  /** Shared counter store for the rate limits (in memory when omitted). */
+  rateLimitStore?: RateLimitStoreFactory;
 }
 
 const batchParams = z.object({ batchId: entityIdSchema });
@@ -80,8 +83,10 @@ export function createImportsRouter(
   router.post(
     '/',
     uploadRateLimit(
+      'imports.upload',
       dependencies.uploadRate ?? DEFAULT_UPLOAD_RATE,
       (req) => auth.getCaller(req).userId,
+      dependencies.rateLimitStore,
     ),
     rawBody(MAX_STATEMENT_FILE_BYTES),
     validateRequest(

@@ -3,7 +3,14 @@
 CalmCash is an AI-powered personal finance tracker. The roadmap covers transaction management,
 budgeting, bank statement imports, financial analytics, AI insights, and recurring payments.
 
-> **Status — Phase 11 (advanced financial intelligence) complete.** CalmCash now forecasts cash
+> **Status — Phase 12 (production readiness) complete.** CalmCash is installable as a PWA (offline
+> page, safe update prompt, no caching of personal data), enforces abuse limits across API
+> instances through PostgreSQL, lets a payment recorded elsewhere settle a scheduled bill, offers a
+> full data export, and ships production containers, CI, a manual migration workflow, a restore
+> drill, and system-design documentation with runbooks. See
+> [docs/system-design](docs/system-design/README.md).
+>
+> **Phase 11 (advanced financial intelligence).** CalmCash forecasts cash
 > flow for the next 7–90 days from balances, confirmed schedules, and typical spending; predicts
 > category spending; suggests budget limits from history; projects savings goals; shows explainable
 > health indicators (no opaque score) and evidence-backed recommendations; and runs what-if scenarios
@@ -35,6 +42,7 @@ budgeting, bank statement imports, financial analytics, AI insights, and recurri
 | Tooling     | pnpm 11 workspaces, Vitest 5, Supertest, Testing Library + jsdom, ESLint 9 + typescript-eslint, Prettier |
 | Worker      | Node.js 24 process; PostgreSQL job tables (`FOR UPDATE SKIP LOCKED`, leases) — no Redis                  |
 | Local infra | Docker Compose (PostgreSQL, Mailpit)                                                                     |
+| Delivery    | Vercel (web + API services, worker daemon), Neon, private Vercel Blob; Dockerfiles; GitHub Actions CI    |
 
 ## Repository structure
 
@@ -116,6 +124,7 @@ as **Connected**. The API health endpoints are
 | `pnpm test:ai-smoke`    | Optional: check the real local Ollama model (synthetic data). |
 | `pnpm format`           | Format with Prettier.                                         |
 | `pnpm format:check`     | Check formatting.                                             |
+| `pnpm check:artifacts`  | After a build: bundle dependencies and browser-asset secrets. |
 | `pnpm db:up`            | Start local PostgreSQL (Docker).                              |
 | `pnpm mail:up`          | Start Mailpit, the local e-mail catcher (Docker).             |
 | `pnpm db:down`          | Stop local services (data is kept).                           |
@@ -126,6 +135,8 @@ as **Connected**. The API health endpoints are
 
 ## Documentation
 
+- [System design](docs/system-design/README.md) — architecture diagrams, ADRs, deployment
+  topology, security, performance, backups and restore drill, runbooks, environment variables.
 - [Vercel deployment](docs/vercel-deployment.md) — services, public routing, worker daemon,
   private receipt storage, environment settings, and release checks.
 - [Architecture](docs/architecture.md) — boundaries, communication, module layout, error handling,

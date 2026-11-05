@@ -38,9 +38,10 @@ export interface AutomationDomain {
  * Reminders describe expected money; they never record it. The recurring service needs a ledger
  * only to confirm a payment, which the worker never does, so its ledger refuses every write.
  */
-export const LEDGER_REFUSES_WRITES: Pick<TransactionsService, 'recordLinked'> = {
+export const LEDGER_REFUSES_WRITES: Pick<TransactionsService, 'recordLinked' | 'get'> = {
   recordLinked: () =>
     Promise.reject(new Error('The automation worker never records transactions.')),
+  get: () => Promise.reject(new Error('The automation worker never links transactions.')),
 };
 
 export function createAutomationDomain(prisma: PrismaClient, now: () => Date): AutomationDomain {

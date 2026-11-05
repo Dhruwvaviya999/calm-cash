@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { PreferencesScript } from '@/components/theme/preferences-script';
 import { PreferencesSync } from '@/components/theme/preferences-sync';
 import { AuthProvider } from '@/features/auth';
+import { ConnectionStatus, ServiceWorkerManager } from '@/features/pwa';
 
 import './globals.css';
 
@@ -12,6 +13,9 @@ export const metadata: Metadata = {
   title: { default: 'CalmCash', template: '%s · CalmCash' },
   description: 'CalmCash — a calm, AI-powered personal finance tracker.',
   applicationName: 'CalmCash',
+  // Installed on iOS: full-screen launch with the app's own name under the icon.
+  appleWebApp: { capable: true, title: 'CalmCash', statusBarStyle: 'default' },
+  formatDetection: { telephone: false },
 };
 
 export const viewport: Viewport = {
@@ -34,6 +38,8 @@ export default function RootLayout({ children }: LayoutProps<'/'>): ReactNode {
       </head>
       <body>
         <PreferencesSync />
+        <ConnectionStatus />
+        <ServiceWorkerManager />
         {/* Session state for every route: restored from the API, never from browser storage. */}
         <AuthProvider>{children}</AuthProvider>
       </body>

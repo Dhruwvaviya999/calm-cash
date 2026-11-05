@@ -7,3 +7,8 @@ next-env.d.ts
 apps/api/src/generated/
 prisma/migrations/
 apps/web/AGENTS.md
+
+# Vendored agent skills (third-party, pinned by skills-lock.json); not CalmCash source.
+.agents/
+.claude/skills/
+.windsurf/

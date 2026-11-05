@@ -3,6 +3,7 @@ import {
   endRecurringScheduleInputSchema,
   entityIdSchema,
   isoDateSchema,
+  linkOccurrenceInputSchema,
   postponeOccurrenceInputSchema,
   recordOccurrenceInputSchema,
   recurringListQuerySchema,
@@ -23,7 +24,8 @@ const occurrenceParams = z.object({ scheduleId: entityIdSchema, date: isoDateSch
 /**
  * Recurring income and expenses. Every route requires a session; state-changing routes also
  * require the CSRF token. Schedules are plans: only `…/record` moves money, by recording a real
- * transaction through the transactions module.
+ * transaction through the transactions module; `…/link` settles a payment with a transaction the
+ * person already recorded (e.g. an imported bank row) and moves nothing.
  *
  * GET    /                                           list (`status`, `type`, `subscription`)
  * GET    /upcoming                                   overdue and due occurrences (`from`, `to`, …)
@@ -33,6 +35,8 @@ const occurrenceParams = z.object({ scheduleId: entityIdSchema, date: isoDateSch
  * POST   /:scheduleId/pause | resume | archive | restore   lifecycle (idempotent)
  * POST   /:scheduleId/end                            last date occurrences may fall on
  * POST   /:scheduleId/occurrences/:date/record       record the real transaction (exactly once)
+ * GET    /:scheduleId/occurrences/:date/link-candidates   existing transactions that could settle it
+ * POST   /:scheduleId/occurrences/:date/link         settle it with an existing transaction
  * POST   /:scheduleId/occurrences/:date/skip         not this time (idempotent)
  * POST   /:scheduleId/occurrences/:date/unskip       expect it after all
  * POST   /:scheduleId/occurrences/:date/postpone     move the due date later
@@ -79,6 +83,17 @@ export function createRecurringRouter(service: RecurringService, auth: AuthBound
     validateRequest(
       z.object({ params: occurrenceParams, body: recordOccurrenceInputSchema.default({}) }),
       controller.record,
+    ),
+  );
+  router.get(
+    '/:scheduleId/occurrences/:date/link-candidates',
+    validateRequest(occurrence, controller.linkCandidates),
+  );
+  router.post(
+    '/:scheduleId/occurrences/:date/link',
+    validateRequest(
+      z.object({ params: occurrenceParams, body: linkOccurrenceInputSchema }),
+      controller.link,
     ),
   );
   router.post('/:scheduleId/occurrences/:date/skip', validateRequest(occurrence, controller.skip));

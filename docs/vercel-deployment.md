@@ -74,6 +74,9 @@ Set these values in Vercel's environment settings, separately for Production and
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE` | SMTP provider settings; typically port `587` with `false` for STARTTLS, or `465` with `true`             |
 | `SMTP_USER`, `SMTP_PASSWORD`            | Provider credentials; set both together                                                                  |
 | `EMAIL_FROM`                            | Verified sender, e.g. `CalmCash <no-reply@your-domain.example>`                                          |
+| `AI_ENABLED`                            | `false` (no private model is reachable from Vercel)                                                      |
+| `OPS_STATUS_TOKEN`                      | Optional, ≥ 32 random characters: enables `GET /api/v1/health/status` for monitors                       |
+| `SHUTDOWN_TIMEOUT_MS`                   | Worker daemon: below the platform's stop grace period                                                    |
 
 Do not upload the development `.env`, local PostgreSQL or Mailpit settings, or `TEST_DATABASE_URL`.
 No `NEXT_PUBLIC_API_URL` setting or `RECEIPT_STORAGE_DIR` is needed on Vercel. Blob credentials
@@ -169,7 +172,11 @@ Linking to an account and an authenticated Vercel build are required to validate
 and runtime behavior; local unit tests and application builds do not replace those checks.
 
 Before the first production deployment, configure production `DATABASE_URL` and `DIRECT_URL` and apply migrations
-from the repository root with `pnpm db:deploy`. Use a controlled release step for later migrations;
+from the repository root with `pnpm db:deploy`, or — preferred — with the manual GitHub Actions
+workflow _Database migration_ (`.github/workflows/database-migrate.yml`), which checks the target,
+requires a confirmed backup, and prints migration status before and after. **Pending on Neon as of
+Phase 12:** `20261103090000_financial_intelligence` and `20261104090000_shared_rate_limits` (both
+additive). They have been applied only to local databases. Use a controlled release step for later migrations;
 service builds do not automatically migrate a database. Import the Git repository, confirm the
 root and production branch settings, add environment values, and deploy after configuration review.
 
@@ -188,3 +195,23 @@ The app then works as before: AI controls are hidden or explain that AI is off, 
 insights, repeating-payment suggestions, history-based category suggestions, and reports keep
 working. Running the assistant in production needs the API on a host that can reach a private
 Ollama server (for example a container next to it), with the `OLLAMA_*` limits in `.env.example`.
+
+## Phase 12 additions
+
+- **Rate limits** are shared through PostgreSQL, so several function instances enforce one limit.
+  Set `TRUST_PROXY_HOPS=1` and check that per-IP limits key on the client, not the proxy.
+- **Security headers and CSP** are sent by the web service (`next.config.ts`); the API keeps
+  Helmet. Verify on the preview with the browser console open: there must be no CSP violations.
+- **PWA**: the version used for service-worker updates is Vercel's deployment ID
+  (`VERCEL_DEPLOYMENT_ID`), so each deployment is announced once to open tabs. Kill switch:
+  `NEXT_PUBLIC_SERVICE_WORKER=off`.
+- **Data export** streams from a function. Check a large synthetic account on a preview against
+  the function's duration and memory limits before relying on it.
+- **Previews** have no worker daemon and need their own `CORS_ORIGINS`/`WEB_APP_URL` (a stable
+  branch alias). Test sign-in, a CSRF-protected write, and a receipt upload on the preview itself.
+- **Monitoring**: point an uptime check at `/api/v1/health/ready`, and a private check (bearer
+  token) at `/api/v1/health/status` alerting on `worker.status != running` and growing
+  `jobs.oldestDueSecondsAgo`.
+
+System-level documentation: [system-design/](system-design/README.md) — topology, cookies and
+origins, free-tier limits, backups, runbooks, and the environment inventory.

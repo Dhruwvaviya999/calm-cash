@@ -1,7 +1,9 @@
 import type {
   CreateRecurringScheduleInput,
   EndRecurringScheduleInput,
+  LinkOccurrenceInput,
   OccurrenceActionResultDto,
+  OccurrenceLinkCandidatesDto,
   PostponeOccurrenceInput,
   RecordedOccurrenceDto,
   RecordOccurrenceInput,
@@ -44,6 +46,8 @@ export interface RecurringController {
   archive: ScheduleAction;
   restore: ScheduleAction;
   record: Handler<OccurrenceParams & { body: RecordOccurrenceInput }, RecordedOccurrenceDto>;
+  link: Handler<OccurrenceParams & { body: LinkOccurrenceInput }, RecordedOccurrenceDto>;
+  linkCandidates: Handler<OccurrenceParams, OccurrenceLinkCandidatesDto>;
   skip: Handler<OccurrenceParams, OccurrenceActionResultDto>;
   unskip: Handler<OccurrenceParams, OccurrenceActionResultDto>;
   postpone: Handler<
@@ -100,6 +104,14 @@ export function createRecurringController(
       const outcome = await service.record(getCaller(req), address(params), body);
       // 201 when the money was recorded now; 200 when an earlier request already recorded it.
       sendSuccess(res, outcome.result, outcome.replayed ? 200 : 201);
+    },
+    link: async ({ params, body }, req, res) => {
+      const outcome = await service.link(getCaller(req), address(params), body);
+      // 201 when the payment was linked now; 200 when an earlier request already linked it.
+      sendSuccess(res, outcome.result, outcome.replayed ? 200 : 201);
+    },
+    linkCandidates: async ({ params }, req, res) => {
+      sendSuccess(res, await service.linkCandidates(getCaller(req), address(params)));
     },
     skip: async ({ params }, req, res) => {
       sendSuccess(res, await service.skip(getCaller(req), address(params)));

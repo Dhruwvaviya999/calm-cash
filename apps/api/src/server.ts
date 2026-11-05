@@ -6,6 +6,7 @@ import { createBackgroundTasks } from './lib/background-tasks';
 import { createDatabaseHealthCheck, createPrismaClient } from './lib/database';
 import { createSmtpEmailService } from './lib/email';
 import { createLogger } from './lib/logger';
+import { createPostgresRateLimitStores } from './lib/rate-limit';
 import { registerGracefulShutdown } from './lib/shutdown';
 import { createPrismaAccountsRepository } from './modules/accounts/accounts.repository';
 import { createPrismaAuthRepository } from './modules/auth/auth.repository';
@@ -19,6 +20,7 @@ import { createPrismaAiRepository } from './modules/ai/ai.repository';
 import { createOllamaProvider } from './modules/ai/provider/ollama-provider';
 import { createPrismaInsightsRepository } from './modules/insights/insights.repository';
 import { createPrismaIntelligenceRepository } from './modules/intelligence/intelligence.repository';
+import { createOperationsStatusReader } from './modules/health/operations-status';
 import { createPrismaReceiptsRepository } from './modules/receipts/receipts.repository';
 import { createLocalFileStorage } from './lib/file-storage';
 import { createVercelBlobFileStorage } from './lib/vercel-blob-storage';
@@ -51,16 +53,32 @@ const prisma = createPrismaClient(config.databaseUrl, logger);
 const emailService = createSmtpEmailService(config.email, logger);
 const backgroundTasks = createBackgroundTasks(logger);
 const authRepository = createPrismaAuthRepository(prisma);
+// Abuse-limit counters shared by every API instance (and surviving restarts and cold starts).
+const rateLimitStore = createPostgresRateLimitStores(prisma);
 
 const app = createApp({
   config,
   logger,
   checkDatabase: createDatabaseHealthCheck(prisma, logger),
+  ...(config.opsStatusToken === undefined
+    ? {}
+    : {
+        operationsStatus: {
+          token: config.opsStatusToken,
+          read: createOperationsStatusReader({
+            prisma,
+            receiptStorageProvider: config.receiptStorageProvider,
+            emailMode: config.email.mode,
+            aiEnabled: config.ai.enabled,
+          }),
+        },
+      }),
   auth: {
     repository: authRepository,
     passwordHasher: createArgon2PasswordHasher(),
     emailService,
     backgroundTasks,
+    rateLimitStore,
   },
   accounts: { repository: createPrismaAccountsRepository(prisma) },
   transactions: { repository: createPrismaTransactionsRepository(prisma) },
@@ -70,22 +88,25 @@ const app = createApp({
   budgets: { repository: createPrismaBudgetsRepository(prisma) },
   recurring: { repository: createPrismaRecurringRepository(prisma) },
   goals: { repository: createPrismaGoalsRepository(prisma) },
-  imports: { repository: createPrismaImportsRepository(prisma) },
+  imports: { repository: createPrismaImportsRepository(prisma), rateLimitStore },
   receipts: {
     repository: createPrismaReceiptsRepository(prisma),
     storage:
       config.receiptStorageProvider === 'vercel-blob' && config.blobReadWriteToken !== undefined
         ? createVercelBlobFileStorage(config.blobReadWriteToken)
         : createLocalFileStorage(config.receiptStorageDir),
+    rateLimitStore,
   },
   notifications: { repository: createPrismaNotificationsRepository(prisma) },
   ai: {
     repository: createPrismaAiRepository(prisma),
     provider: createOllamaProvider({ config: config.ai, logger }),
     config: config.ai,
+    rateLimitStore,
   },
   insights: { repository: createPrismaInsightsRepository(prisma) },
-  intelligence: { repository: createPrismaIntelligenceRepository(prisma) },
+  intelligence: { repository: createPrismaIntelligenceRepository(prisma), rateLimitStore },
+  dataExport: { prisma, rateLimitStore },
 });
 
 const stopSessionCleanup = scheduleSessionCleanup({

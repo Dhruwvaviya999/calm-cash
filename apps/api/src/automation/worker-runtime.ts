@@ -22,6 +22,8 @@ import { createScheduler, type Scheduler } from './scheduler';
 // that is no longer useful, run the scheduler when due, then process one bounded batch of jobs and
 // one of e-mail deliveries. Everything durable is in PostgreSQL; the in-process loop only decides
 // when to look, so a stopped worker loses nothing and several workers can run side by side.
+// Once `stop()` is called no new batch is claimed, the item in progress finishes, and claimed
+// items not yet started are released immediately rather than waiting for their leases to expire.
 
 export interface WorkerSettings {
   workerId: string;
@@ -46,6 +48,8 @@ export interface CycleReport {
   recovered: number;
   expired: number;
   scheduled: boolean;
+  /** Claimed but not started because the worker is stopping; handed back at once. */
+  released: number;
   jobs: { claimed: number; succeeded: number; retried: number; failed: number };
   deliveries: Record<DeliveryOutcome, number> & { claimed: number };
 }
@@ -168,6 +172,18 @@ export function createWorkerRuntime({
     lastHeartbeat = at.getTime();
   };
 
+  const releaseUnstarted = async (
+    ids: readonly string[],
+    release: (id: string, workerId: string, at: Date) => Promise<boolean>,
+  ): Promise<number> => {
+    let released = 0;
+    for (const id of ids) {
+      if (await release(id, settings.workerId, now())) released += 1;
+    }
+    if (released > 0) log.info({ released }, 'Released unstarted work while stopping');
+    return released;
+  };
+
   const handleJob = async (
     job: ClaimedJob,
     at: Date,
@@ -209,6 +225,7 @@ export function createWorkerRuntime({
       recovered: 0,
       expired: 0,
       scheduled: false,
+      released: 0,
       jobs: { claimed: 0, succeeded: 0, retried: 0, failed: 0 },
       deliveries: {
         claimed: 0,
@@ -240,9 +257,17 @@ export function createWorkerRuntime({
         limit: settings.batchSize,
       });
       report.jobs.claimed = claimed.length;
-      for (const job of claimed) {
+      for (const [index, job] of claimed.entries()) {
+        if (isStopping()) {
+          report.released += await releaseUnstarted(
+            claimed.slice(index).map((item) => item.id),
+            jobs.release,
+          );
+          return report;
+        }
         report.jobs[await handleJob(job, now())] += 1;
       }
+      if (isStopping()) return report;
 
       const batch = await deliveries.claim({
         workerId: settings.workerId,
@@ -251,7 +276,14 @@ export function createWorkerRuntime({
         limit: settings.batchSize,
       });
       report.deliveries.claimed = batch.length;
-      for (const delivery of batch) {
+      for (const [index, delivery] of batch.entries()) {
+        if (isStopping()) {
+          report.released += await releaseUnstarted(
+            batch.slice(index).map((item) => item.id),
+            deliveries.release,
+          );
+          return report;
+        }
         let outcome: DeliveryOutcome;
         try {
           outcome = await processDelivery(
