@@ -14,19 +14,12 @@ import {
   updateScenarioInputSchema,
   type ApiSuccessResponse,
 } from '@calmcash/shared';
-import {
-  Router,
-  type NextFunction,
-  type Request,
-  type RequestHandler,
-  type Response,
-} from 'express';
-import { rateLimit } from 'express-rate-limit';
+import { Router, type Response } from 'express';
 import { z } from 'zod';
 
-import { AppError } from '../../lib/app-error';
 import { noStore, type AuthBoundary } from '../../lib/auth-boundary';
 import { sendSuccess } from '../../lib/http-response';
+import { createRateLimiter, type RateLimitStoreFactory } from '../../lib/rate-limit';
 import { validateRequest } from '../../middleware/validate-request';
 import type { IntelligenceRepository } from './intelligence.repository';
 import type { IntelligenceService } from './intelligence.service';
@@ -37,6 +30,8 @@ export interface IntelligenceModuleDependencies {
   now?: () => Date;
   /** Requests per signed-in user and window (in memory, like the other per-user limits). */
   rateLimit?: { limit: number; windowMs: number };
+  /** Shared counter store for the rate limits (in memory when omitted). */
+  rateLimitStore?: RateLimitStoreFactory;
 }
 
 /** Generous: every view is a handful of aggregate queries, but none is free. */
@@ -49,23 +44,6 @@ type Reply<K extends keyof IntelligenceService> = Response<
 const noQuery = z.object({ query: z.strictObject({}) });
 const scenarioParams = z.object({ scenarioId: entityIdSchema });
 const keyParams = z.object({ key: intelligenceKeySchema });
-
-function perUserLimit(
-  rule: { limit: number; windowMs: number },
-  userIdOf: (req: Request) => string,
-): RequestHandler {
-  return rateLimit({
-    windowMs: rule.windowMs,
-    limit: rule.limit,
-    standardHeaders: 'draft-8',
-    legacyHeaders: false,
-    keyGenerator: (req: Request) => `intelligence:${userIdOf(req)}`,
-    handler: (_req: Request, res: Response, next: NextFunction) => {
-      res.setHeader('Retry-After', String(Math.ceil(rule.windowMs / 1000)));
-      next(new AppError(429, 'RATE_LIMITED', 'Too many requests. Please wait a few minutes.'));
-    },
-  });
-}
 
 /**
  * Financial intelligence (read-only calculations, plus saved scenario assumptions). Every route
@@ -91,11 +69,20 @@ export function createIntelligenceRouter(
   service: IntelligenceService,
   auth: AuthBoundary,
   rule: { limit: number; windowMs: number } = DEFAULT_INTELLIGENCE_RATE_LIMIT,
+  store?: RateLimitStoreFactory,
 ): Router {
   const router = Router();
   const caller = (req: object): ReturnType<AuthBoundary['getCaller']> => auth.getCaller(req);
   router.use(auth.requireSession, auth.requireCsrf, noStore);
-  router.use(perUserLimit(rule, (req) => caller(req).userId));
+  router.use(
+    createRateLimiter({
+      name: 'intelligence.requests',
+      rule,
+      key: (req) => `intelligence:${caller(req).userId}`,
+      message: 'Too many requests. Please wait a few minutes.',
+      ...(store === undefined ? {} : { store }),
+    }),
+  );
 
   router.get(
     '/overview',

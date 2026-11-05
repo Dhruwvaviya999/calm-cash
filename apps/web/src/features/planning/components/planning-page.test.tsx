@@ -58,6 +58,8 @@ const recurring = vi.hoisted(() => ({
   recordOccurrence: vi.fn(),
   skipOccurrence: vi.fn(),
   postponeOccurrence: vi.fn(),
+  getLinkCandidates: vi.fn(),
+  linkOccurrence: vi.fn(),
 }));
 vi.mock('@/services/recurring.service', () => recurring);
 
@@ -259,6 +261,7 @@ beforeEach(() => {
   categories.listCategories.mockResolvedValue(categoryList);
   accounts.listAccounts.mockResolvedValue(accountList);
   recurring.getUpcomingOccurrences.mockResolvedValue(upcoming);
+  recurring.getLinkCandidates.mockResolvedValue({ candidates: [] });
   recurring.listSchedules.mockResolvedValue(scheduleList);
   show('');
 });
@@ -411,6 +414,62 @@ describe('PlanningPage › recurring', () => {
       },
     });
     expect(await screen.findByText(/Rent was recorded/)).toBeDefined();
+  });
+
+  it('settles a payment with a transaction that was already recorded', async () => {
+    show('recurring');
+    const [overdueRent] = upcoming.items;
+    if (overdueRent === undefined) throw new Error('Missing fixture.');
+    const paid = {
+      transaction: {
+        id: '0193a000-0000-7000-8000-000000000902',
+        userId: USER,
+        accountId: BANK,
+        type: 'expense' as const,
+        amountMinor: '2500000',
+        currency: 'INR',
+        description: 'NEFT to landlord',
+        categoryId: RENT,
+        tags: [],
+        status: 'active' as const,
+        occurredAt: '2026-10-03T06:30:00.000Z',
+        ...AUDIT,
+      },
+      account: {
+        id: BANK,
+        name: 'HDFC Salary',
+        type: 'bank' as const,
+        currency: 'INR',
+        status: 'active' as const,
+      },
+    };
+    recurring.getLinkCandidates.mockResolvedValue({ candidates: [paid] });
+    recurring.linkOccurrence.mockResolvedValue({
+      occurrence: { ...overdueRent.occurrence, status: 'recorded' },
+      schedule: { schedule: rent },
+      transaction: paid,
+    });
+    renderWithAuth(<PlanningPage />);
+    const user = userEvent.setup();
+
+    const overdue = await screen.findByRole('list', { name: 'Overdue payments' });
+    await user.click(within(overdue).getByRole('button', { name: 'Record Rent' }));
+    const sheet = await screen.findByRole('dialog');
+    expect(await within(sheet).findByText('Already recorded this payment?')).toBeDefined();
+    expect(recurring.getLinkCandidates).toHaveBeenCalledWith(
+      rent.id,
+      '2026-10-01',
+      expect.any(AbortSignal),
+    );
+
+    await user.click(within(sheet).getByRole('button', { name: /Use NEFT to landlord/ }));
+    expect(recurring.linkOccurrence).toHaveBeenCalledWith(
+      rent.id,
+      '2026-10-01',
+      paid.transaction.id,
+    );
+    expect(recurring.recordOccurrence).not.toHaveBeenCalled();
+    expect(await screen.findByText(/Nothing new was recorded/)).toBeDefined();
   });
 
   it('shows the month calendar with accessible day labels', async () => {

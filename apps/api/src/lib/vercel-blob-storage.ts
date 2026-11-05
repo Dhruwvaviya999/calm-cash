@@ -1,4 +1,4 @@
-import { del, get, put } from '@vercel/blob';
+import { del, get, list, put } from '@vercel/blob';
 
 import { isStorageKey, StoredFileMissingError, type FileStorage } from './file-storage';
 
@@ -28,6 +28,25 @@ export function createVercelBlobFileStorage(token: string): FileStorage {
     remove: async (key) => {
       // Blob deletion, like the local adapter, succeeds when the object is already absent.
       await del(pathOf(key), { token });
+    },
+    list: async function* () {
+      let cursor: string | undefined;
+      do {
+        const page = await list({
+          prefix: 'receipts/',
+          limit: 1000,
+          token,
+          ...(cursor === undefined ? {} : { cursor }),
+        });
+        for (const blob of page.blobs) {
+          const key = blob.pathname.split('/').at(-1) ?? '';
+          // Only `receipts/<shard>/<key>` objects are receipts; anything else is left alone.
+          if (isStorageKey(key) && blob.pathname === pathOf(key)) {
+            yield { key, storedAt: blob.uploadedAt };
+          }
+        }
+        cursor = page.hasMore ? page.cursor : undefined;
+      } while (cursor !== undefined);
     },
   };
 }

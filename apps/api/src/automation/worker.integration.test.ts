@@ -22,8 +22,10 @@ import {
   type SignedIn,
   type TestContext,
 } from '../testing/integration-harness';
+import { createPrismaDeliveryStore } from './delivery-store';
 import { LEDGER_REFUSES_WRITES } from './domain';
 import { createPrismaJobStore } from './job-store';
+import type { WorkerRuntime } from './worker-runtime';
 
 // The worker's durability and failure handling against the real database: claims under
 // concurrency, leases and recovery, unreadable jobs, retries, expiry, and honest e-mail outcomes.
@@ -219,6 +221,63 @@ describe('job queue', () => {
   });
 });
 
+describe('stopping', () => {
+  it('finishes the job in progress and hands back the rest of the batch at once', async () => {
+    const now = new Date();
+    await maintenanceJobs(5, 'stopping', now);
+    const context = createContext();
+    const running: { worker?: WorkerRuntime } = {};
+    // SIGTERM arrives while the first job runs: the log line after it triggers `stop()`.
+    const sink = new Writable({
+      write(chunk: Buffer, _encoding, done) {
+        if (chunk.toString('utf8').includes('Job succeeded')) void running.worker?.stop();
+        done();
+      },
+    });
+    const worker = createTestWorker(prisma, {
+      email: context.email,
+      now: () => now,
+      logger: pino({ level: 'info' }, sink),
+    });
+    running.worker = worker;
+
+    const report = await worker.runCycle();
+
+    // The five jobs plus the scheduler's own maintenance job were claimed; only one ran.
+    expect(report.jobs).toMatchObject({ claimed: 6, succeeded: 1 });
+    expect(report.released).toBe(5);
+    expect(report.deliveries.claimed).toBe(0); // No new batch is claimed once stopping.
+    const rows = await prisma.automationJob.findMany();
+    expect(rows.filter((row) => row.status === 'succeeded')).toHaveLength(1);
+    const pending = rows.filter((row) => row.status === 'pending');
+    expect(pending).toHaveLength(5);
+    // Not attempted, so no attempt is used up and no lease is left behind.
+    expect(pending.every((row) => row.attempts === 0 && row.lockedBy === null)).toBe(true);
+
+    // Another worker (or this one after a restart) picks them up immediately.
+    const next = await drain(createTestWorker(prisma, { email: context.email, now: () => now }));
+    expect(next.reduce((sum, cycle) => sum + cycle.jobs.succeeded, 0)).toBe(5);
+  });
+
+  it('only the claiming worker can release a job or a delivery', async () => {
+    const now = new Date();
+    await maintenanceJobs(1, 'fenced', now);
+    const jobs = createPrismaJobStore(prisma);
+    const [job] = await jobs.claim({ workerId: 'worker-a', now, leaseMs: MINUTE, limit: 1 });
+    if (job === undefined) throw new Error('Nothing claimed.');
+
+    expect(await jobs.release(job.id, 'worker-b', now)).toBe(false);
+    expect(await jobs.release(job.id, 'worker-a', now)).toBe(true);
+    expect(await jobs.release(job.id, 'worker-a', now)).toBe(false);
+    expect(await prisma.automationJob.findUniqueOrThrow({ where: { id: job.id } })).toMatchObject({
+      status: 'pending',
+      attempts: 0,
+      lockedBy: null,
+      lockedUntil: null,
+    });
+  });
+});
+
 describe('e-mail delivery', () => {
   async function queuedEmail(seeded: Seeded): Promise<string> {
     await setPreferences(seeded.user, { channels: { budget_alerts: { email: true } } });
@@ -255,6 +314,29 @@ describe('e-mail delivery', () => {
     expect(types).toEqual(['budget_approaching_limit', 'email_delivery_problem']);
     const unread = await seeded.user.agent.get(`${API_V1_PREFIX}/notifications/unread-count`);
     expect(unread.body).toEqual({ success: true, data: { unreadCount: 2 } });
+  });
+
+  it('releases a claimed delivery without spending an attempt or marking it uncertain', async () => {
+    const seeded = await seedBudget();
+    seeded.context.email.failWith = 'retryable';
+    const id = await queuedEmail(seeded);
+    const later = new Date(seeded.context.clock.now().getTime() + 2 * MINUTE);
+    const deliveries = createPrismaDeliveryStore(prisma);
+    const claimed = await deliveries.claim({
+      workerId: 'stopping-worker',
+      now: later,
+      leaseMs: MINUTE,
+      limit: 5,
+    });
+    expect(claimed.map((delivery) => delivery.id)).toEqual([id]);
+
+    expect(await deliveries.release(id, 'stopping-worker', later)).toBe(true);
+    expect(await prisma.notificationDelivery.findUniqueOrThrow({ where: { id } })).toMatchObject({
+      status: 'retry_scheduled',
+      attempts: 1,
+      lockedBy: null,
+      outcomeUncertain: false,
+    });
   });
 
   it('stops at once on a permanent failure such as a rejected recipient', async () => {

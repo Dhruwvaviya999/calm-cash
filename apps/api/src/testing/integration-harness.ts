@@ -13,6 +13,7 @@ import { afterAll, beforeEach, expect } from 'vitest';
 import { createApp } from '../app';
 import { createBackgroundTasks, type BackgroundTasks } from '../lib/background-tasks';
 import { createPrismaClient, type PrismaClient } from '../lib/database';
+import { createPostgresRateLimitStores } from '../lib/rate-limit';
 import {
   createPrismaAccountsRepository,
   type AccountsRepository,
@@ -108,6 +109,10 @@ export interface TestContextOptions {
   receiptStorage?: (real: InMemoryFileStorage) => FileStorage;
   /** AI settings of this app (defaults: enabled, effectively unlimited). */
   ai?: { enabled?: boolean; rateLimit?: { limit: number; windowMs: number } };
+  /** Count rate limits in PostgreSQL, as deployed (default: a memory store per app). */
+  sharedRateLimits?: boolean;
+  /** Data-export limit (default: five an hour, as deployed). */
+  dataExportRateLimit?: { limit: number; windowMs: number };
 }
 
 /**
@@ -124,8 +129,8 @@ export function useIntegrationDatabase(): {
 
   beforeEach(async () => {
     // Users cascade to sessions, tokens, notifications, and all financial tables; jobs without an
-    // owner (maintenance) and worker heartbeats are cleared explicitly.
-    await prisma.$executeRaw`TRUNCATE TABLE "users", "automation_jobs", "worker_heartbeats" CASCADE`;
+    // owner (maintenance), worker heartbeats, and rate-limit counters are cleared explicitly.
+    await prisma.$executeRaw`TRUNCATE TABLE "users", "automation_jobs", "worker_heartbeats", "rate_limit_counters" CASCADE`;
   });
 
   afterAll(async () => {
@@ -141,6 +146,9 @@ export function useIntegrationDatabase(): {
       const repository = createPrismaAuthRepository(prisma);
       const storage = createInMemoryFileStorage();
       const ai = createFakeAiProvider();
+      const rateLimitStore =
+        options.sharedRateLimits === true ? createPostgresRateLimitStores(prisma) : undefined;
+      const shared = rateLimitStore === undefined ? {} : { rateLimitStore };
       const app = createApp({
         config: { ...TEST_APP_CONFIG, jsonBodyLimit: '10kb' },
         logger,
@@ -152,6 +160,7 @@ export function useIntegrationDatabase(): {
           backgroundTasks: tasks,
           now: clock.now,
           rateLimits: { ...UNLIMITED_RATE_LIMITS, ...options.rateLimits },
+          ...shared,
         },
         accounts: {
           repository: (options.accountsRepository ?? ((real) => real))(
@@ -185,12 +194,14 @@ export function useIntegrationDatabase(): {
           ),
           now: clock.now,
           uploadRate: { limit: 10_000, windowMs: 60_000 },
+          ...shared,
         },
         receipts: {
           repository: createPrismaReceiptsRepository(prisma),
           storage: (options.receiptStorage ?? ((real) => real))(storage),
           now: clock.now,
           uploadRate: { limit: 10_000, windowMs: 60_000 },
+          ...shared,
         },
         notifications: {
           repository: createPrismaNotificationsRepository(prisma),
@@ -204,12 +215,22 @@ export function useIntegrationDatabase(): {
             rateLimit: options.ai?.rateLimit ?? { limit: 10_000, windowMs: 60_000 },
           },
           now: clock.now,
+          ...shared,
         },
         insights: { repository: createPrismaInsightsRepository(prisma) },
         intelligence: {
           repository: createPrismaIntelligenceRepository(prisma),
           now: clock.now,
           rateLimit: { limit: 10_000, windowMs: 60_000 },
+          ...shared,
+        },
+        dataExport: {
+          prisma,
+          now: clock.now,
+          ...(options.dataExportRateLimit === undefined
+            ? {}
+            : { rateLimit: options.dataExportRateLimit }),
+          ...shared,
         },
       });
       return { app, prisma, repository, email, clock, tasks, storage, ai };

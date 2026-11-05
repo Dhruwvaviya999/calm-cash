@@ -17,3 +17,15 @@
 **/*.tsbuildinfo
 **/*.log
 apps/api/src/generated
+# Agent tooling, local data, and artefacts that never belong in an image
+.claude
+.windsurf
+.vscode
+**/test-results
+**/playwright-report
+**/*.dump
+**/*.sql.gz
+**/backups
+**/.ollama
+**/screenshots
+apps/web/.next

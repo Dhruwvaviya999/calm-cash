@@ -6,10 +6,12 @@ import {
   daysBetween,
   DEFAULT_UPCOMING_DAYS,
   isOccurrenceDate,
+  MAX_OCCURRENCE_LINK_CANDIDATES,
   MAX_POSTPONE_DAYS,
   MAX_UPCOMING_OCCURRENCES,
   MAX_UPCOMING_RANGE_DAYS,
   OCCURRENCE_ACTION_HORIZON_DAYS,
+  OCCURRENCE_LINK_WINDOW_DAYS,
   occurrencesBetween,
   parseMinorUnits,
   serializeMinorUnits,
@@ -20,8 +22,10 @@ import {
   type EndRecurringScheduleInput,
   type ExpectedTotalsDto,
   type IsoDateString,
+  type LinkOccurrenceInput,
   type OccurrenceActionResultDto,
   type OccurrenceDto,
+  type OccurrenceLinkCandidatesDto,
   type PostponeOccurrenceInput,
   type RecordedOccurrenceDto,
   type RecordOccurrenceInput,
@@ -35,6 +39,7 @@ import {
   type UpdateRecurringScheduleInput,
 } from '@calmcash/shared';
 
+import type { Transaction } from '../../generated/prisma/client';
 import { AppError } from '../../lib/app-error';
 import type { Caller } from '../../lib/auth-boundary';
 import { fromIsoDate, toIsoDate } from '../../lib/calendar-dates';
@@ -133,12 +138,26 @@ export interface RecurringService {
     address: OccurrenceAddress,
     input: PostponeOccurrenceInput,
   ) => Promise<OccurrenceActionResultDto>;
+  /**
+   * Settles the occurrence with a transaction the person already recorded (an ordinary entry or an
+   * imported statement row) instead of recording a second one. Moves no money.
+   */
+  link: (
+    caller: Caller,
+    address: OccurrenceAddress,
+    input: LinkOccurrenceInput,
+  ) => Promise<RecordOutcome>;
+  /** Transactions that could settle the occurrence, closest amount and date first. */
+  linkCandidates: (
+    caller: Caller,
+    address: OccurrenceAddress,
+  ) => Promise<OccurrenceLinkCandidatesDto>;
 }
 
 export interface RecurringServiceDependencies {
   repository: RecurringRepository;
   /** Records the real transaction of a confirmed occurrence (the transactions module's ledger). */
-  transactions: Pick<TransactionsService, 'recordLinked'>;
+  transactions: Pick<TransactionsService, 'recordLinked' | 'get'>;
   now: () => Date;
 }
 
@@ -161,6 +180,44 @@ function invalid(details: ApiErrorDetail[]): AppError {
 
 function conflict(message: string): AppError {
   return new AppError(409, 'CONFLICT', message);
+}
+
+/** The local dates an existing transaction may fall on to settle an occurrence. */
+function linkWindow(
+  scheduledDate: IsoDateString,
+  dueDate: IsoDateString,
+): { from: IsoDateString; to: IsoDateString } {
+  return {
+    from: addDaysToIsoDate(scheduledDate, -OCCURRENCE_LINK_WINDOW_DAYS),
+    to: addDaysToIsoDate(dueDate, OCCURRENCE_LINK_WINDOW_DAYS),
+  };
+}
+
+/** Why `transaction` cannot settle an occurrence of `schedule` (empty when it can). */
+function linkProblems(
+  schedule: Pick<ScheduleRecord, 'type' | 'currency'>,
+  transaction: Transaction,
+  occurredOn: IsoDateString,
+  window: { from: IsoDateString; to: IsoDateString },
+): string[] {
+  const problems: string[] = [];
+  if (transaction.voidedAt !== null) {
+    problems.push('This transaction is voided. Choose an active one.');
+  }
+  if (transaction.type !== schedule.type) {
+    problems.push(
+      schedule.type === 'income' ? 'Choose an income transaction.' : 'Choose an expense.',
+    );
+  }
+  if (transaction.currency !== schedule.currency) {
+    problems.push(`Choose a transaction in ${schedule.currency}.`);
+  }
+  if (occurredOn < window.from || occurredOn > window.to) {
+    problems.push(
+      `Choose a transaction within ${String(OCCURRENCE_LINK_WINDOW_DAYS)} days of this payment.`,
+    );
+  }
+  return problems;
 }
 
 /** A stored currency code as a supported one (`undefined` for anything else). */
@@ -932,6 +989,99 @@ export function createRecurringService({
         await store.deleteOccurrence(schedule.id, fromIsoDate(address.date));
         await advance(store, schedule);
       }),
+
+    link: async (caller, address, { transactionId }) => {
+      const scheduledDate = fromIsoDate(address.date);
+      const replayed = await repository.inScheduleWrite(async (store) => {
+        const schedule = await lockOne(store, caller, address.scheduleId);
+        const row = rowsByDate(await store.occurrences(schedule.id)).get(address.date);
+        if (row?.state === 'recorded' && row.transactionId !== null) {
+          if (row.transactionId === transactionId) {
+            return true; // Linked by an earlier request: nothing changes.
+          }
+          throw conflict('This payment is already recorded with another transaction.');
+        }
+        if (row?.state === 'skipped' || row?.state === 'paused') {
+          throw conflict(
+            'This payment was skipped. Choose “Expect it after all” before recording it.',
+          );
+        }
+        assertActionable(caller, schedule, address.date);
+        // Locked until commit: it cannot be voided, edited, or linked elsewhere meanwhile.
+        const transaction = await store.lockTransaction(caller.userId, transactionId);
+        if (transaction === null) {
+          throw invalid([
+            { path: 'body.transactionId', message: 'Choose one of your transactions.' },
+          ]);
+        }
+        const dueDate = row === undefined ? address.date : toIsoDate(row.dueDate);
+        const problems = linkProblems(
+          schedule,
+          transaction,
+          calendarDateInTimeZone(transaction.occurredAt, caller.timeZone),
+          linkWindow(address.date, dueDate),
+        );
+        if (problems.length > 0) {
+          throw invalid(problems.map((message) => ({ path: 'body.transactionId', message })));
+        }
+        if ((await store.occurrenceOfTransaction(transaction.id)) !== null) {
+          throw conflict('That transaction already settles another scheduled payment.');
+        }
+        await store.putOccurrence(caller.userId, schedule.id, scheduledDate, {
+          dueDate: row === undefined ? scheduledDate : row.dueDate,
+          state: 'recorded',
+          transactionId: transaction.id,
+          resolvedAt: now(),
+        });
+        await advance(store, schedule);
+        return false;
+      });
+
+      const loaded = await loadOccurrence(caller, address);
+      return {
+        result: { ...loaded, transaction: await transactions.get(caller, transactionId) },
+        replayed,
+      };
+    },
+
+    linkCandidates: async (caller, address) => {
+      const schedule = await repository.find(caller.userId, address.scheduleId);
+      if (schedule === null) {
+        throw notFound();
+      }
+      if (!isOccurrenceDate(ruleOf(schedule), address.date)) {
+        throw occurrenceNotFound();
+      }
+      const row = (await repository.occurrencesOf(caller.userId, [schedule.id])).find(
+        (occurrence) => toIsoDate(occurrence.scheduledDate) === address.date,
+      );
+      if (isResolved(row)) {
+        return { candidates: [] };
+      }
+      const due = row === undefined ? address.date : toIsoDate(row.dueDate);
+      const window = linkWindow(address.date, due);
+      // A day of slack on each side covers every time zone; exact local dates are checked below.
+      const rows = await repository.linkCandidates(caller.userId, {
+        type: schedule.type === 'income' ? 'income' : 'expense',
+        currency: schedule.currency,
+        from: fromIsoDate(addDaysToIsoDate(window.from, -1)),
+        to: fromIsoDate(addDaysToIsoDate(window.to, 2)),
+        expectedMinor: schedule.amountMinor,
+        dueAt: fromIsoDate(due),
+        limit: MAX_OCCURRENCE_LINK_CANDIDATES + 4,
+      });
+      const ranked = rows
+        .filter((transaction) => {
+          const on = calendarDateInTimeZone(transaction.occurredAt, caller.timeZone);
+          return on >= window.from && on <= window.to;
+        })
+        .slice(0, MAX_OCCURRENCE_LINK_CANDIDATES);
+      const candidates = [];
+      for (const candidate of ranked) {
+        candidates.push(await transactions.get(caller, candidate.id));
+      }
+      return { candidates };
+    },
 
     postpone: (caller, address, input) =>
       changeOccurrence(caller, address, async (store, schedule, row) => {

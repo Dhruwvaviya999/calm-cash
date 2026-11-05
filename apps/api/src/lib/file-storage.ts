@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 
 // Private file storage for uploaded documents (receipts). Files are addressed only by random,
@@ -17,6 +17,13 @@ export interface FileStorage {
   read: (key: string) => Promise<Buffer>;
   /** Removes the file; succeeds when it is already gone. */
   remove: (key: string) => Promise<void>;
+  /** Every stored file with the time it was written (storage audits and orphan cleanup). */
+  list: () => AsyncIterable<StoredFileInfo>;
+}
+
+export interface StoredFileInfo {
+  key: string;
+  storedAt: Date;
 }
 
 export class StoredFileMissingError extends Error {
@@ -72,6 +79,23 @@ export function createLocalFileStorage(root: string): FileStorage {
     },
     remove: async (key) => {
       await rm(pathOf(key), { force: true });
+    },
+    list: async function* () {
+      let shards: string[];
+      try {
+        shards = await readdir(base);
+      } catch (error: unknown) {
+        if (hasCode(error, 'ENOENT')) return; // Nothing stored yet.
+        throw error;
+      }
+      for (const shard of shards.sort()) {
+        if (!/^[0-9a-f]{2}$/.test(shard)) continue;
+        for (const key of (await readdir(join(base, shard))).sort()) {
+          // Anything else in the directory is not a receipt and is never touched.
+          if (!isStorageKey(key) || key.slice(0, 2) !== shard) continue;
+          yield { key, storedAt: (await stat(join(base, shard, key))).mtime };
+        }
+      }
     },
   };
 }

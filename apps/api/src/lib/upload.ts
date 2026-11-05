@@ -1,13 +1,7 @@
-import express, {
-  type NextFunction,
-  type Request,
-  type RequestHandler,
-  type Response,
-} from 'express';
-import { rateLimit } from 'express-rate-limit';
+import express, { type Request, type RequestHandler } from 'express';
 import { z } from 'zod';
 
-import { AppError } from './app-error';
+import { createRateLimiter, type RateLimitRule, type RateLimitStoreFactory } from './rate-limit';
 
 // Shared plumbing for file uploads. A file is the raw request body (no multipart parsing): the
 // size limit is enforced while the body streams in (413 above it), and the content is validated
@@ -23,34 +17,23 @@ export const uploadBodySchema = z.custom<Buffer>((value) => Buffer.isBuffer(valu
   message: 'Send the file as the request body.',
 });
 
-export interface UploadRateRule {
-  limit: number;
-  windowMs: number;
-}
+export type UploadRateRule = RateLimitRule;
 
 /** Generous for people, tight enough that uploads cannot be used to exhaust the server. */
 export const DEFAULT_UPLOAD_RATE: UploadRateRule = { limit: 60, windowMs: 10 * 60 * 1000 };
 
-/** Counts uploads per signed-in user (in memory; see the auth rate limits for scaling notes). */
+/** Counts uploads per signed-in user; `name` keeps each upload kind's counter separate. */
 export function uploadRateLimit(
+  name: string,
   rule: UploadRateRule,
   userIdOf: (req: Request) => string,
+  store?: RateLimitStoreFactory,
 ): RequestHandler {
-  return rateLimit({
-    windowMs: rule.windowMs,
-    limit: rule.limit,
-    standardHeaders: 'draft-8',
-    legacyHeaders: false,
-    keyGenerator: (req: Request) => `upload:${userIdOf(req)}`,
-    handler: (_req: Request, res: Response, next: NextFunction) => {
-      res.setHeader('Retry-After', String(Math.ceil(rule.windowMs / 1000)));
-      next(
-        new AppError(
-          429,
-          'RATE_LIMITED',
-          'Too many uploads. Please wait a few minutes and try again.',
-        ),
-      );
-    },
+  return createRateLimiter({
+    name,
+    rule,
+    key: (req) => `upload:${userIdOf(req)}`,
+    message: 'Too many uploads. Please wait a few minutes and try again.',
+    ...(store === undefined ? {} : { store }),
   });
 }

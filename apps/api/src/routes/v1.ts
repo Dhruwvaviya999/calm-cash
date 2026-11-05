@@ -40,7 +40,12 @@ import {
 import { createIntelligenceService } from '../modules/intelligence/intelligence.service';
 import { createInsightsService } from '../modules/insights/insights.service';
 import { createSubscriptionsService } from '../modules/subscriptions/subscriptions.service';
+import {
+  createDataExportRouter,
+  type DataExportModuleDependencies,
+} from '../modules/data-export/data-export.routes';
 import { createHealthRouter } from '../modules/health/health.routes';
+import type { OperationsStatusReader } from '../modules/health/operations-status';
 import {
   createNotificationsRouter,
   type NotificationsModuleDependencies,
@@ -68,6 +73,7 @@ import { createTransactionsService } from '../modules/transactions';
 
 export interface V1RouterDependencies {
   checkDatabase: DatabaseHealthCheck;
+  operationsStatus?: { token: string; read: OperationsStatusReader };
   logger: Logger;
   auth: AuthModuleDependencies;
   authConfig: AuthModuleConfig;
@@ -85,6 +91,7 @@ export interface V1RouterDependencies {
   ai: AiModuleDependencies;
   insights: InsightsModuleDependencies;
   intelligence: IntelligenceModuleDependencies;
+  dataExport?: DataExportModuleDependencies;
 }
 
 /**
@@ -96,7 +103,15 @@ export function createV1Router(dependencies: V1RouterDependencies): Router {
   const router = Router();
   const auth = createAuthModule(dependencies.auth, dependencies.authConfig);
 
-  router.use('/health', createHealthRouter({ checkDatabase: dependencies.checkDatabase }));
+  router.use(
+    '/health',
+    createHealthRouter({
+      checkDatabase: dependencies.checkDatabase,
+      ...(dependencies.operationsStatus === undefined
+        ? {}
+        : { operations: dependencies.operationsStatus }),
+    }),
+  );
   router.use('/auth', auth.router);
   const boundary = {
     requireSession: auth.requireSession,
@@ -186,7 +201,12 @@ export function createV1Router(dependencies: V1RouterDependencies): Router {
   });
   router.use(
     '/intelligence',
-    createIntelligenceRouter(intelligence, boundary, dependencies.intelligence.rateLimit),
+    createIntelligenceRouter(
+      intelligence,
+      boundary,
+      dependencies.intelligence.rateLimit,
+      dependencies.intelligence.rateLimitStore,
+    ),
   );
 
   const toolServices = {
@@ -218,8 +238,17 @@ export function createV1Router(dependencies: V1RouterDependencies): Router {
       }),
       boundary,
       dependencies.ai.config.rateLimit,
+      dependencies.ai.rateLimitStore,
     ),
   );
+
+  // Data export (Phase 12): the signed-in person's records as one JSON download.
+  if (dependencies.dataExport !== undefined) {
+    router.use(
+      '/exports',
+      createDataExportRouter(dependencies.dataExport, boundary, dependencies.logger),
+    );
+  }
 
   return router;
 }

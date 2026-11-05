@@ -14,6 +14,8 @@ import type {
   CreateRecurringScheduleInput,
   EndRecurringScheduleInput,
   ExpectedTotalsDto,
+  LinkOccurrenceInput,
+  OccurrenceLinkCandidatesDto,
   OccurrenceActionResultDto,
   OccurrenceDto,
   PostponeOccurrenceInput,
@@ -175,6 +177,14 @@ export const recordOccurrenceInputSchema = z.strictObject({
   notes: transactionNotesSchema.exactOptional(),
   tags: tagListSchema.exactOptional(),
 }) satisfies z.ZodType<RecordOccurrenceInput>;
+
+export const linkOccurrenceInputSchema = z.strictObject({
+  transactionId: entityIdSchema,
+}) satisfies z.ZodType<LinkOccurrenceInput>;
+
+export const occurrenceLinkCandidatesDtoSchema = z.object({
+  candidates: z.array(transactionListItemDtoSchema),
+}) satisfies z.ZodType<OccurrenceLinkCandidatesDto>;
 
 export const postponeOccurrenceInputSchema = z.strictObject({
   dueDate: scheduleDateSchema,

@@ -79,14 +79,15 @@ export function OccurrenceRow({
       <div className="min-w-0 flex-1 basis-48">
         <div className="flex items-baseline justify-between gap-3">
           <p className="truncate font-medium">{schedule.name}</p>
-          <span className={cn('shrink-0 text-right', pending && 'opacity-80')}>
+          <span className="shrink-0 text-right">
+            {/* Only the amount is dimmed: the small label must keep full AA contrast. */}
             {pending && <span className="mr-1 text-xs text-muted-foreground">Expected</span>}
             <FinancialAmount
               amountMinor={occurrence.amountMinor}
               currency={occurrence.currency}
               direction={income ? 'credit' : 'debit'}
               size="sm"
-              className={cn(pending && 'text-foreground')}
+              className={cn(pending && 'text-foreground opacity-80')}
             />
           </span>
         </div>

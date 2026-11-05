@@ -13,6 +13,7 @@ import type { Handler } from '../../lib/controller';
 import type { FileStorage } from '../../lib/file-storage';
 import { sendSuccess } from '../../lib/http-response';
 import type { Logger } from '../../lib/logger';
+import type { RateLimitStoreFactory } from '../../lib/rate-limit';
 import {
   DEFAULT_UPLOAD_RATE,
   rawBody,
@@ -30,6 +31,8 @@ export interface ReceiptsModuleDependencies {
   /** Injectable clock for deterministic tests. */
   now?: () => Date;
   uploadRate?: UploadRateRule;
+  /** Shared counter store for the rate limits (in memory when omitted). */
+  rateLimitStore?: RateLimitStoreFactory;
 }
 
 const transactionParams = z.object({ transactionId: entityIdSchema });
@@ -125,7 +128,12 @@ export function createReceiptsRouter(
   router.get('/', validateRequest(z.object({ params: transactionParams }), list));
   router.post(
     '/',
-    uploadRateLimit(dependencies.uploadRate ?? DEFAULT_UPLOAD_RATE, (req) => caller(req).userId),
+    uploadRateLimit(
+      'receipts.upload',
+      dependencies.uploadRate ?? DEFAULT_UPLOAD_RATE,
+      (req) => caller(req).userId,
+      dependencies.rateLimitStore,
+    ),
     rawBody(MAX_RECEIPT_BYTES),
     validateRequest(
       z.object({

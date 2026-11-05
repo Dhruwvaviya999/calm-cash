@@ -19,7 +19,7 @@
     "@calmcash/shared": "workspace:*",
     "@prisma/adapter-pg": "catalog:",
     "@prisma/client": "catalog:",
-    "nodemailer": "~10.0.16",
+    "nodemailer": "~10.1.7",
     "pino": "^10.4.0",
     "zod": "catalog:"
   },

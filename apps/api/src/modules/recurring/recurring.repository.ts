@@ -14,13 +14,15 @@ import type {
   Category,
   PrismaClient,
   RecurringSchedule,
+  Transaction,
 } from '../../generated/prisma/client';
 import type { LinkedWriteClient } from '../transactions';
 
 // Database access for recurring schedules and the occurrences people acted on. Every query is
 // scoped by the owner's user ID. Writes run in one database transaction that first locks the
 // schedule row (`SELECT … FOR UPDATE`); confirming a payment takes that lock inside the
-// transaction module's ledger, before any account lock, so lock order stays global.
+// transaction module's ledger, before any account lock, so lock order stays global. Linking an
+// existing transaction locks the schedule, then that transaction row (never the reverse).
 
 export type ScheduleRecord = RecurringSchedule;
 
@@ -115,6 +117,27 @@ export interface ScheduleStore {
   deleteOccurrence: (scheduleId: string, scheduledDate: Date) => Promise<void>;
   /** Removes postponed (still expected) rows, optionally only those scheduled after a date. */
   deletePostponed: (scheduleId: string, after?: Date) => Promise<void>;
+  /**
+   * Locks the user's transaction (`SELECT … FOR UPDATE`) so it cannot be voided, edited, or linked
+   * elsewhere until this write commits; null when it is not theirs.
+   */
+  lockTransaction: (userId: string, transactionId: string) => Promise<Transaction | null>;
+  /** The occurrence a transaction already settles, if any. */
+  occurrenceOfTransaction: (
+    transactionId: string,
+  ) => Promise<Pick<OccurrenceRecord, 'scheduleId' | 'scheduledDate'> | null>;
+}
+
+/** Filter of transactions that could settle one occurrence (see `linkCandidates`). */
+export interface LinkCandidateFilter {
+  type: 'income' | 'expense';
+  currency: string;
+  from: Date;
+  to: Date;
+  /** The schedule's expected amount and due instant: closest amount first, then closest date. */
+  expectedMinor: bigint;
+  dueAt: Date;
+  limit: number;
 }
 
 export interface RecurringRepository {
@@ -128,6 +151,8 @@ export interface RecurringRepository {
   inScheduleWrite: <T>(work: (store: ScheduleStore) => Promise<T>) => Promise<T>;
   /** The same operations on a transaction another module opened (a linked ledger write). */
   storeFor: (db: LinkedWriteClient) => ScheduleStore;
+  /** Active transactions of the user that settle no occurrence yet, best match first. */
+  linkCandidates: (userId: string, filter: LinkCandidateFilter) => Promise<Transaction[]>;
 }
 
 const idRowSchema = z.object({ id: z.string() });
@@ -197,6 +222,21 @@ function createStore(tx: Prisma.TransactionClient): ScheduleStore {
       });
     },
 
+    lockTransaction: async (userId, transactionId) => {
+      const rows: unknown = await tx.$queryRaw`
+        SELECT id::text AS "id" FROM transactions
+        WHERE user_id = ${userId}::uuid AND id = ${transactionId}::uuid
+        FOR UPDATE`;
+      const [row] = z.array(idRowSchema).parse(rows);
+      return row === undefined ? null : tx.transaction.findUnique({ where: { id: row.id } });
+    },
+
+    occurrenceOfTransaction: (transactionId) =>
+      tx.scheduledOccurrence.findUnique({
+        where: { transactionId },
+        select: { scheduleId: true, scheduledDate: true },
+      }),
+
     deleteOccurrence: async (scheduleId, scheduledDate) => {
       await tx.scheduledOccurrence.deleteMany({ where: { scheduleId, scheduledDate } });
     },
@@ -258,5 +298,33 @@ export function createPrismaRecurringRepository(prisma: PrismaClient): Recurring
       prisma.$transaction((tx) => work(createStore(tx)), { maxWait: 10_000, timeout: 20_000 }),
 
     storeFor: (db) => createStore(db),
+
+    linkCandidates: async (userId, { type, currency, from, to, expectedMinor, dueAt, limit }) => {
+      // Ranked in the database, so many small recent entries cannot crowd out the real payment.
+      const rows: unknown = await prisma.$queryRaw`
+        SELECT t.id::text AS "id"
+        FROM transactions t
+        WHERE t.user_id = ${userId}::uuid
+          AND t.type = ${type}::transaction_type
+          AND t.currency = ${currency}
+          AND t.voided_at IS NULL
+          AND t.occurred_at BETWEEN ${from}::timestamptz AND ${to}::timestamptz
+          AND NOT EXISTS (SELECT 1 FROM scheduled_occurrences o WHERE o.transaction_id = t.id)
+        ORDER BY abs(t.amount_minor - ${expectedMinor}),
+                 abs(extract(epoch FROM t.occurred_at - ${dueAt}::timestamptz)),
+                 t.id
+        LIMIT ${limit}`;
+      const ids = z
+        .array(idRowSchema)
+        .parse(rows)
+        .map((row) => row.id);
+      if (ids.length === 0) return [];
+      const found = await prisma.transaction.findMany({ where: { userId, id: { in: ids } } });
+      const byId = new Map(found.map((row) => [row.id, row]));
+      return ids.flatMap((id) => {
+        const row = byId.get(id);
+        return row === undefined ? [] : [row];
+      });
+    },
   };
 }

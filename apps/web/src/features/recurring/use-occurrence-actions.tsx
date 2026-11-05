@@ -9,6 +9,7 @@ import { formatDate, formatMoney } from '@/lib/format';
 import { describeRequestError } from '@/lib/form-errors';
 import { skipOccurrence } from '@/services/recurring.service';
 
+import { LinkExistingPayment } from './components/link-existing-payment';
 import { PostponeForm, RecordOccurrenceForm } from './components/occurrence-forms';
 import type { OccurrenceActions } from './components/occurrence-list';
 
@@ -85,24 +86,40 @@ export function useOccurrenceActions({
         description="Confirm what actually happened. Only this creates a transaction."
       >
         {recording !== undefined && (
-          <RecordOccurrenceForm
+          <div
             key={`${recording.occurrence.scheduleId}:${recording.occurrence.scheduledDate}`}
-            target={recording}
-            accounts={accounts}
-            categories={categories}
-            timeZone={timeZone}
-            onCancel={() => {
-              setRecording(undefined);
-            }}
-            onRecorded={(result) => {
-              setRecording(undefined);
-              onNotice({
-                tone: 'success',
-                message: `${result.transaction.transaction.description} was recorded: ${formatMoney(result.transaction.transaction.amountMinor, result.transaction.transaction.currency)} in ${result.transaction.account.name}.`,
-              });
-              onChanged();
-            }}
-          />
+            className="flex flex-col gap-5"
+          >
+            <LinkExistingPayment
+              target={recording}
+              timeZone={timeZone}
+              onLinked={(result) => {
+                setRecording(undefined);
+                onNotice({
+                  tone: 'success',
+                  message: `${recording.schedule.name} is settled by ${result.transaction.transaction.description} (${formatMoney(result.transaction.transaction.amountMinor, result.transaction.transaction.currency)}). Nothing new was recorded.`,
+                });
+                onChanged();
+              }}
+            />
+            <RecordOccurrenceForm
+              target={recording}
+              accounts={accounts}
+              categories={categories}
+              timeZone={timeZone}
+              onCancel={() => {
+                setRecording(undefined);
+              }}
+              onRecorded={(result) => {
+                setRecording(undefined);
+                onNotice({
+                  tone: 'success',
+                  message: `${result.transaction.transaction.description} was recorded: ${formatMoney(result.transaction.transaction.amountMinor, result.transaction.transaction.currency)} in ${result.transaction.account.name}.`,
+                });
+                onChanged();
+              }}
+            />
+          </div>
         )}
       </SideSheet>
 

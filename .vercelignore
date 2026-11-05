@@ -17,3 +17,10 @@
 **/*.tsbuildinfo
 **/*.log
 apps/api/src/generated
+.claude
+.windsurf
+**/test-results
+**/playwright-report
+**/*.dump
+**/*.sql.gz
+**/backups
