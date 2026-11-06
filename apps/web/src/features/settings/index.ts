@@ -4,3 +4,4 @@ export { AppearanceSettings } from './components/appearance-settings';
 export { ChangePasswordForm } from './components/change-password-form';
 export { ProfileSettings } from './components/profile-settings';
 export { ResetDisplayPreferences } from './components/reset-display-preferences';
+export { DataExport } from './components/data-export';

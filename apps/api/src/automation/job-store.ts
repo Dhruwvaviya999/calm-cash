@@ -51,6 +51,11 @@ export interface JobStore {
     now: Date,
   ) => Promise<boolean>;
   fail: (jobId: string, workerId: string, errorCode: string, now: Date) => Promise<boolean>;
+  /**
+   * Hands back a claimed job this worker never started (it is shutting down): pending again at
+   * once, with the claim's attempt returned, instead of waiting for the lease to expire.
+   */
+  release: (jobId: string, workerId: string, now: Date) => Promise<boolean>;
   /** Jobs whose worker vanished: back to pending, or failed once their attempts are used up. */
   recoverExpiredLeases: (now: Date) => Promise<number>;
   /** Waiting jobs past their expiry stop being eligible (never replayed blindly). */
@@ -181,6 +186,18 @@ export function createPrismaJobStore(prisma: PrismaClient): JobStore {
           updatedAt: now,
         },
       });
+      return count > 0;
+    },
+
+    release: async (jobId, workerId, now) => {
+      const count = await prisma.$executeRaw`
+        UPDATE automation_jobs
+        SET status = 'pending',
+            attempts = GREATEST(attempts - 1, 0),
+            locked_by = NULL,
+            locked_until = NULL,
+            updated_at = ${now}::timestamptz
+        WHERE id = ${jobId}::uuid AND status = 'processing' AND locked_by = ${workerId}`;
       return count > 0;
     },
 

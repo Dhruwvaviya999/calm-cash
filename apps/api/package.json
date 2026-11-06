@@ -18,7 +18,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
-    "test:ai-smoke": "vitest run --config vitest.ai-smoke.config.ts"
+    "test:ai-smoke": "vitest run --config vitest.ai-smoke.config.ts",
+    "seed:synthetic": "node --env-file-if-exists=../../.env --import tsx src/cli/seed-synthetic.ts",
+    "receipts:audit": "node --env-file-if-exists=../../.env --import tsx src/cli/receipts-audit.ts"
   },
   "dependencies": {
     "@calmcash/shared": "workspace:*",
@@ -31,7 +33,7 @@
     "express": "^5.3.0",
     "express-rate-limit": "^8.7.1",
     "helmet": "^8.3.0",
-    "nodemailer": "~10.0.16",
+    "nodemailer": "~10.1.7",
     "pino": "^10.4.0",
     "pino-http": "^11.0.0",
     "zod": "catalog:"

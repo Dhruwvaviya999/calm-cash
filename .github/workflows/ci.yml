@@ -1,0 +1,105 @@
+# Continuous integration: every pull request and every push to main/development.
+#
+# Uses only throw-away services started for the run: a PostgreSQL container (never Neon or any
+# shared database), no SMTP server (tests use an in-memory mailer), and no model (tests use the
+# fake AI provider). No repository secret is read by this workflow.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, development]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Throw-away credentials of the service container below; not a secret.
+  DATABASE_URL: postgresql://calmcash:ci-only-password@localhost:5432/calmcash_ci
+  TEST_DATABASE_URL: postgresql://calmcash:ci-only-password@localhost:5432/calmcash_test
+  CORS_ORIGINS: http://localhost:3000
+  EMAIL_DELIVERY_MODE: disabled
+  AI_ENABLED: 'false'
+  NEXT_TELEMETRY_DISABLED: '1'
+  # Type-aware ESLint over the whole workspace needs more than Node's default heap.
+  NODE_OPTIONS: --max-old-space-size=6144
+
+jobs:
+  verify:
+    name: Lint, types, tests, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: calmcash
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: calmcash_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U calmcash -d calmcash_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4 # Version from package.json "packageManager".
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm # Caches the package store only — never build output or data.
+
+      - name: Install (frozen lockfile; generates Prisma Client)
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply migrations to the CI database
+        run: pnpm db:deploy
+
+      - name: Schema matches migrations
+        run: pnpm exec prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code
+
+      - name: Formatting
+        run: pnpm format:check
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Unit and component tests
+        run: pnpm test
+
+      - name: Integration tests (dedicated *_test database)
+        run: pnpm test:integration
+
+      - name: Build API, worker, and web
+        env:
+          # Same-origin API (as on Vercel), so the production artefact check below applies.
+          NEXT_PUBLIC_API_URL: ''
+          APP_VERSION: ${{ github.sha }}
+        run: pnpm build
+
+      - name: Production artefact check
+        run: node scripts/check-artifacts.mjs --production
+
+  images:
+    name: Container images
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build worker image
+        run: docker build -f Dockerfile.worker -t calmcash-worker:ci .
+      - name: Build API image
+        run: docker build -f Dockerfile.api -t calmcash-api:ci .
+      - name: Images run as non-root
+        run: |
+          test "$(docker run --rm --entrypoint id calmcash-worker:ci -u)" != 0
+          test "$(docker run --rm --entrypoint id calmcash-api:ci -u)" != 0

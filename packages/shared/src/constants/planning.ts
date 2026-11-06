@@ -136,6 +136,15 @@ export const OCCURRENCE_ACTION_HORIZON_DAYS = 366;
 /** Largest postponement, counted from the scheduled date. */
 export const MAX_POSTPONE_DAYS = 366;
 
+/**
+ * An existing transaction may settle an occurrence when it happened at most this many days before
+ * the scheduled date or after the due date (bills are often paid early or late, never by a year).
+ */
+export const OCCURRENCE_LINK_WINDOW_DAYS = 45;
+
+/** Candidate transactions offered when linking a payment to an occurrence. */
+export const MAX_OCCURRENCE_LINK_CANDIDATES = 10;
+
 // --- Subscriptions -------------------------------------------------------------------------------
 
 /**

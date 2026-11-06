@@ -820,6 +820,19 @@ model WorkerHeartbeat {
   @@map("worker_heartbeats")
 }
 
+/// One fixed-window counter of an abuse limit (sign-in, recovery, uploads, AI, intelligence),
+/// shared by every API instance. `key` is a SHA-256 hash of the limiter name and its subject
+/// (IP, normalised e-mail, or user), so no address is stored. Expired rows are deleted by the
+/// worker's maintenance job; a row past `reset_at` simply starts a new window.
+model RateLimitCounter {
+  key     String   @id @db.Char(64)
+  hits    Int
+  resetAt DateTime @map("reset_at") @db.Timestamptz(3)
+
+  @@index([resetAt])
+  @@map("rate_limit_counters")
+}
+
 /// A person's AI switch. No row means AI features are on (they run on the local model only).
 model AiPreference {
   userId    String   @id @map("user_id") @db.Uuid

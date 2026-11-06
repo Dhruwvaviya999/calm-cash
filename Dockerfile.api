@@ -1,0 +1,64 @@
+# syntax=docker/dockerfile:1
+# CalmCash API as a long-running container, for hosts other than Vercel Functions (Vercel bundles
+# apps/api/src/server.ts itself; see docs/vercel-deployment.md). Build from the repository root:
+#
+#   docker build -f Dockerfile.api -t calmcash-api .
+#
+# Configuration comes only from the environment at run time. Receipts need RECEIPT_STORAGE_PROVIDER
+# =vercel-blob, or RECEIPT_STORAGE_DIR on a mounted persistent volume (e.g. /data/receipts) — the
+# container's own filesystem is not persistent.
+
+ARG NODE_IMAGE=node:24-bookworm-slim
+
+FROM ${NODE_IMAGE} AS base
+ENV CI=true \
+    PNPM_HOME=/pnpm \
+    PATH=/pnpm:$PATH \
+    pnpm_config_store_dir=/pnpm/store \
+    pnpm_config_cache_dir=/pnpm/cache \
+    pnpm_config_fetch_timeout=300000
+RUN npm install --global pnpm@11.21.0 && npm cache clean --force
+WORKDIR /app
+
+# --- Build ---------------------------------------------------------------------------------------
+FROM base AS build
+COPY . .
+# The pnpm store and cache are BuildKit caches shared by both stages: packages are downloaded,
+# and the lockfile's supply-chain policy check is done, once.
+RUN --mount=type=cache,id=calmcash-pnpm,target=/pnpm/store \
+    --mount=type=cache,id=calmcash-pnpm-cache,target=/pnpm/cache \
+    pnpm install --frozen-lockfile --filter . --filter @calmcash/api... \
+ && pnpm --filter @calmcash/api build
+
+# --- Production dependencies only ----------------------------------------------------------------
+FROM base AS deps
+# Manifests come from the build stage, so this runs after it and reuses its downloads.
+COPY --from=build /app/pnpm-lock.yaml /app/pnpm-workspace.yaml /app/package.json ./
+COPY --from=build /app/apps/api/package.json apps/api/
+COPY --from=build /app/packages/shared/package.json packages/shared/
+# Scripts are skipped: the generated Prisma client is compiled into the bundle, and argon2 loads
+# its bundled N-API prebuild when required (checked by the image smoke test).
+RUN --mount=type=cache,id=calmcash-pnpm,target=/pnpm/store \
+    --mount=type=cache,id=calmcash-pnpm-cache,target=/pnpm/cache \
+    pnpm install --frozen-lockfile --prod --ignore-scripts --filter @calmcash/api...
+
+# --- Runtime -------------------------------------------------------------------------------------
+FROM ${NODE_IMAGE} AS runtime
+ENV NODE_ENV=production \
+    API_HOST=0.0.0.0 \
+    API_PORT=4000
+WORKDIR /app
+COPY --from=deps --chown=node:node /app/node_modules ./node_modules
+COPY --from=deps --chown=node:node /app/apps/api/node_modules ./apps/api/node_modules
+COPY --from=build --chown=node:node /app/apps/api/dist ./apps/api/dist
+COPY --from=build --chown=node:node /app/apps/api/package.json ./apps/api/package.json
+# A writable, owned mount point for a persistent receipt volume (never used unless configured).
+RUN mkdir -p /data/receipts && chown -R node:node /data && chmod 700 /data/receipts
+USER node
+EXPOSE 4000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:'+process.env.API_PORT+'/api/v1/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+# Exec form so node (PID 1) receives SIGTERM: the API stops accepting connections, lets requests
+# finish, drains background e-mail, and closes the database pool within SHUTDOWN_TIMEOUT_MS.
+STOPSIGNAL SIGTERM
+CMD ["node", "--enable-source-maps", "apps/api/dist/server.js"]

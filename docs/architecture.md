@@ -334,8 +334,8 @@ Rules that keep modules independent:
 | Opaque sessions in PostgreSQL (no JWT)        | Instant revocation, server-side expiry, nothing secret readable by scripts; one database round trip.           |
 | `argon2` (node-argon2) for Argon2id           | Reference C implementation with bundled N-API prebuilds (`allowBuilds` only compiles as a fallback).           |
 | HMAC-derived CSRF token, hash stored          | Synchronizer token bound to the session that survives page reloads without storing it in clear.                |
-| `express-rate-limit` (memory store)           | Maintained, typed, standard headers; swap the store for Redis before running several instances.                |
-| nodemailer (`~10.0`) + Mailpit                | Provider-neutral SMTP behind a small `EmailService` interface; Mailpit keeps local mail on the machine.        |
+| `express-rate-limit` + PostgreSQL store       | Maintained, typed, standard headers; counters shared across instances in `rate_limit_counters` (Phase 12).     |
+| nodemailer (`~10.1`) + Mailpit                | Provider-neutral SMTP behind a small `EmailService` interface; Mailpit keeps local mail on the machine.        |
 | Testing Library + jsdom (per-file opt-in)     | Real interaction tests for forms and guards; static-markup tests stay in plain Node.                           |
 | PostgreSQL job tables for the worker          | `FOR UPDATE SKIP LOCKED` claims, leases, and unique keys give a durable queue without Redis or a paid service. |
 | Worker imports `@calmcash/api/automation`     | One explicit entry point reuses the API's services instead of copying financial rules into a new package.      |
@@ -569,7 +569,7 @@ and reconciliation are in [database-design.md §3e](./database-design.md#3e-stat
   `duplicate-detection.ts` (the three checks; pure) · `row-evaluation.ts` (rows → status, proposal,
   candidates; pure) · repository (batch and row locks, bulk row updates with `unnest`) · service ·
   mapper · controller · routes. Raw bodies are read with `express.raw` (no multipart parser) behind
-  a per-user upload rate limit (60 uploads per 10 minutes, in memory).
+  a per-user upload rate limit (60 uploads per 10 minutes, shared in PostgreSQL since Phase 12).
 - **Recording money.** Importing calls `transactions.recordLinked(caller, input, { claim, commit },
 { idempotencyKey: row.id })`, exactly like recurring payments (§16): the import module never writes
   transactions or balances. Lock order is the staged row, then the accounts (by ID). The approved
@@ -1041,9 +1041,34 @@ occurrences). Every calculation is bounded and synchronous, so the Phase 9 worke
 
 ### Known limitations
 
-- A bill paid without recording its occurrence stays overdue and is counted as still to pay (and its
-  transaction also counts as everyday spending).
+- ~~A bill paid without recording its occurrence stays overdue and double counts.~~ Resolved in
+  Phase 12: the payment can be linked to the occurrence (`…/occurrences/:date/link`).
 - Forecasts are per currency, not per account; there is no currency conversion.
 - Scenario category changes use main categories only; goal reminders are not part of notifications.
 - On a CPU-only machine `qwen3:1.7b` can take longer than the request timeout for an explanation;
   the fixed wording is then shown (the figures are identical either way).
+
+## 21. Production readiness (Phase 12)
+
+Phase 12 prepared CalmCash for production without new financial features. The system-level
+documentation — diagrams, ADRs, deployment, security, performance, backups, runbooks, and the
+environment inventory — lives in [system-design/](system-design/README.md). Code changes:
+
+- **Shared rate limits** (`lib/rate-limit.ts`): every limiter counts in PostgreSQL
+  (`rate_limit_counters`), so limits hold across instances and restarts.
+- **Recurring payments**: an existing transaction can settle a scheduled occurrence
+  (`GET …/link-candidates`, `POST …/link`), fixing Phase 11's double counting.
+- **Worker shutdown**: stops between items and releases unstarted claims; verified with real
+  SIGTERM/SIGINT in Linux containers. Worker maintenance also removes stale sessions and expired
+  rate-limit counters.
+- **Operations**: `GET /api/v1/health/status` (bearer `OPS_STATUS_TOKEN`), receipt storage audit and
+  orphan cleanup (`pnpm --filter @calmcash/api receipts:audit`), restore drill
+  (`scripts/restore-drill.sh`), synthetic data (`seed:synthetic`).
+- **Data export**: `GET /api/v1/exports/financial-data` and Settings › Your data.
+- **PWA**: manifest, icons, service worker (static assets + offline page only), update notice,
+  install entry point; CSP and security headers on the web app.
+- **Packaging and CI**: `Dockerfile.api`, slimmer `Dockerfile.worker`, `.github/workflows/ci.yml`,
+  manual `database-migrate.yml`, `scripts/check-artifacts.mjs`.
+- Transactions page queries no longer share one connection (removes pg's "already executing a
+  query" deprecation warning, which came from Prisma loading `include` relations concurrently
+  inside a batch transaction).

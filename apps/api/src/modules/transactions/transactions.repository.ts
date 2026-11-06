@@ -303,7 +303,11 @@ export function createPrismaTransactionsRepository(
 
     findPage: async (userId, { filters, timeZone, sort, page, pageSize }) => {
       const where = transactionWhere(userId, filters, timeZone);
-      const [rows, total] = await prisma.$transaction([
+      // Two independent reads on separate pool connections. A batch `$transaction` added nothing
+      // here (under READ COMMITTED each statement has its own snapshot anyway) and pinned both to
+      // one connection, where Prisma's concurrent relation loads for `include` queue up behind
+      // each other (pg's "client is already executing a query" deprecation).
+      const [rows, total] = await Promise.all([
         prisma.transaction.findMany({
           where,
           include: refsInclude,

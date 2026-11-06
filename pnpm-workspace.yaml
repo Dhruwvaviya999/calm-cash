@@ -21,3 +21,10 @@ catalog:
   vite: ^8.3.5
   vitest: ^5.0.5
   zod: ^4.6.7
+
+# Security overrides (Phase 12 dependency audit). @vercel/cli-config (via @vercel/blob and
+# @vercel/functions -> @vercel/oidc) pins zod 4.1.11, affected by GHSA "Zod can exhaust memory while
+# validating oversized constrained collections" (fixed in 4.6.6). Same major version; it uses the
+# workspace's zod instead.
+overrides:
+  '@vercel/cli-config>zod': 'catalog:'

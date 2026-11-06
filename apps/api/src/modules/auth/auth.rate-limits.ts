@@ -1,18 +1,19 @@
 import { emailAddressSchema } from '@calmcash/shared';
-import type { NextFunction, Request, RequestHandler, Response } from 'express';
-import { ipKeyGenerator, rateLimit } from 'express-rate-limit';
+import type { Request, RequestHandler } from 'express';
+import { ipKeyGenerator } from 'express-rate-limit';
 
-import { AppError } from '../../lib/app-error';
+import {
+  createRateLimiter,
+  type RateLimitRule,
+  type RateLimitStoreFactory,
+} from '../../lib/rate-limit';
 import { getAuthContext } from './auth.middleware';
 
-// Abuse limits for the authentication endpoints. Counters live in process memory (one store per
-// limiter): with several API instances each keeps its own counts, so the effective limit is
-// multiplied by the instance count — move to a shared store (e.g. Redis) before scaling out.
+// Abuse limits for the authentication endpoints. Counters live in the store supplied by the
+// composition root: PostgreSQL in deployed processes, so limits hold across API instances and
+// restarts; process memory when no store is given (unit tests).
 
-export interface RateLimitRule {
-  limit: number;
-  windowMs: number;
-}
+export type { RateLimitRule } from '../../lib/rate-limit';
 
 export interface AuthRateLimits {
   /** Failed sign-ins per client IP. */
@@ -73,30 +74,7 @@ function keyFor(strategy: KeyStrategy, req: Request): string {
   }
 }
 
-function createLimiter(
-  rule: RateLimitRule,
-  strategy: KeyStrategy,
-  options: { countOnlyFailures?: boolean } = {},
-): RequestHandler {
-  return rateLimit({
-    windowMs: rule.windowMs,
-    limit: rule.limit,
-    standardHeaders: 'draft-8',
-    legacyHeaders: false,
-    skipSuccessfulRequests: options.countOnlyFailures ?? false,
-    keyGenerator: (req: Request) => keyFor(strategy, req),
-    handler: (_req: Request, res: Response, next: NextFunction) => {
-      res.setHeader('Retry-After', String(Math.ceil(rule.windowMs / 1000)));
-      next(
-        new AppError(
-          429,
-          'RATE_LIMITED',
-          'Too many attempts. Please wait a few minutes and try again.',
-        ),
-      );
-    },
-  });
-}
+const LIMITED_MESSAGE = 'Too many attempts. Please wait a few minutes and try again.';
 
 export interface AuthRateLimiters {
   login: RequestHandler[];
@@ -108,24 +86,40 @@ export interface AuthRateLimiters {
   changePassword: RequestHandler[];
 }
 
-/** Builds fresh limiters (with their own counters) for one application instance. */
-export function createAuthRateLimiters(limits: Readonly<AuthRateLimits>): AuthRateLimiters {
+/** Builds the limiters for one application instance; `store` shares their counters. */
+export function createAuthRateLimiters(
+  limits: Readonly<AuthRateLimits>,
+  store?: RateLimitStoreFactory,
+): AuthRateLimiters {
+  const limiter = (
+    name: keyof AuthRateLimits,
+    strategy: KeyStrategy,
+    options: { countOnlyFailures?: boolean } = {},
+  ): RequestHandler =>
+    createRateLimiter({
+      name: `auth.${name}`,
+      rule: limits[name],
+      key: (req) => keyFor(strategy, req),
+      message: LIMITED_MESSAGE,
+      ...options,
+      ...(store === undefined ? {} : { store }),
+    });
   return {
     login: [
-      createLimiter(limits.loginPerIp, 'ip', { countOnlyFailures: true }),
-      createLimiter(limits.loginPerEmail, 'email', { countOnlyFailures: true }),
+      limiter('loginPerIp', 'ip', { countOnlyFailures: true }),
+      limiter('loginPerEmail', 'email', { countOnlyFailures: true }),
     ],
-    register: [createLimiter(limits.registerPerIp, 'ip')],
-    verifyEmail: [createLimiter(limits.verifyEmailPerIp, 'ip')],
+    register: [limiter('registerPerIp', 'ip')],
+    verifyEmail: [limiter('verifyEmailPerIp', 'ip')],
     resendVerification: [
-      createLimiter(limits.resendVerificationPerIp, 'ip'),
-      createLimiter(limits.resendVerificationPerEmail, 'email'),
+      limiter('resendVerificationPerIp', 'ip'),
+      limiter('resendVerificationPerEmail', 'email'),
     ],
     forgotPassword: [
-      createLimiter(limits.forgotPasswordPerIp, 'ip'),
-      createLimiter(limits.forgotPasswordPerEmail, 'email'),
+      limiter('forgotPasswordPerIp', 'ip'),
+      limiter('forgotPasswordPerEmail', 'email'),
     ],
-    resetPassword: [createLimiter(limits.resetPasswordPerIp, 'ip')],
-    changePassword: [createLimiter(limits.changePasswordPerUser, 'user')],
+    resetPassword: [limiter('resetPasswordPerIp', 'ip')],
+    changePassword: [limiter('changePasswordPerUser', 'user')],
   };
 }

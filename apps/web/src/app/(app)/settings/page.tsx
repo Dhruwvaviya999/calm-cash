@@ -7,11 +7,13 @@ import {
   ActiveSessions,
   AppearanceSettings,
   ChangePasswordForm,
+  DataExport,
   ProfileSettings,
   ResetDisplayPreferences,
 } from '@/features/settings';
 import { AiPrivacySettings } from '@/features/ai';
 import { NotificationPreferences } from '@/features/notifications';
+import { InstallApp } from '@/features/pwa';
 import { SystemStatusCard } from '@/features/system-status';
 
 export const metadata: Metadata = { title: 'Settings' };
@@ -104,6 +106,24 @@ export default function SettingsPage(): ReactNode {
           description="Choose a theme. It is saved on this device and applied instantly."
         >
           <AppearanceSettings />
+        </SettingsSection>
+
+        <SettingsSection
+          id="data-heading"
+          anchor="data"
+          title="Your data"
+          description="Download a copy of everything CalmCash keeps about your money, whenever you like."
+        >
+          <DataExport />
+        </SettingsSection>
+
+        <SettingsSection
+          id="install-heading"
+          anchor="install"
+          title="Install the app"
+          description="Add CalmCash to your home screen or app list. It opens in its own window and stays signed in like this browser."
+        >
+          <InstallApp />
         </SettingsSection>
 
         <SettingsSection

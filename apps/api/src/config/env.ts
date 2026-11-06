@@ -52,6 +52,8 @@ export interface AppConfig {
   blobReadWriteToken: string | undefined;
   /** Local AI (Ollama) settings. */
   ai: AiConfig;
+  /** Bearer token of the operator status endpoint; the endpoint is off when unset. */
+  opsStatusToken: string | undefined;
 }
 
 const DEVELOPMENT_SESSION_COOKIE = 'calmcash_session';
@@ -112,6 +114,9 @@ const envSchema = z
     RECEIPT_STORAGE_DIR: optionalString,
     RECEIPT_STORAGE_PROVIDER: z.enum(['local', 'vercel-blob']).default('local'),
     BLOB_READ_WRITE_TOKEN: optionalString,
+    OPS_STATUS_TOKEN: optionalString.pipe(
+      z.string().min(32, 'Use at least 32 random characters.').optional(),
+    ),
     VERCEL: z.string().optional(),
   })
   .superRefine((env, context) => {
@@ -230,6 +235,7 @@ export function parseEnv(source: Readonly<Record<string, string | undefined>>): 
       receiptStorageProvider: env.RECEIPT_STORAGE_PROVIDER,
       blobReadWriteToken: env.BLOB_READ_WRITE_TOKEN,
       ai: toAiConfig(env),
+      opsStatusToken: env.OPS_STATUS_TOKEN,
     },
   };
 }
